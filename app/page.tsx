@@ -25,8 +25,8 @@ import {
 } from "lucide-react";
 import ImagePlaceholder from "@/components/ImagePlaceholder";
 import HeroImage from "@/components/HeroImage";
-import Reveal from "@/components/Reveal2";
-import StatCounter from "@/components/StatCounter2";
+import Reveal from "@/components/Reveal";
+import StatCounter from "@/components/StatCounter";
 
 interface IconCard {
   icon: LucideIcon;
