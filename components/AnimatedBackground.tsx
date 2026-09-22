@@ -30,7 +30,7 @@ const PARTICLES: Particle[] = [
 export default function AnimatedBackground() {
   return (
     <div
-      className="fixed inset-0 -z-10 overflow-hidden pointer-events-none"
+      className="fixed inset-0 -z-10 overflow-hidden pointer-events-none bg-[#FBF8F2]"
       aria-hidden="true"
     >
       {/* Blob besar yang melayang pelan */}

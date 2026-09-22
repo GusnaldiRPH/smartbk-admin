@@ -118,9 +118,8 @@ const APK_URL = process.env.NEXT_PUBLIC_APK_DOWNLOAD_URL ?? "";
 
 export default function LandingPage() {
   return (
-    <div className="relative bg-[#FBF8F2] text-ink overflow-x-hidden">
+    <div className="text-ink overflow-x-hidden">
       <AnimatedBackground />
-      <div className="relative z-10">
       {/* ===== Header ===== */}
       <header className="sticky top-0 z-20 bg-white/80 backdrop-blur border-b border-primary-100">
         <div className="max-w-6xl mx-auto px-5 py-3.5 flex items-center justify-between">
@@ -492,7 +491,6 @@ export default function LandingPage() {
           </Link>
         </div>
       </footer>
-      </div>
     </div>
   );
 }
