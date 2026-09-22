@@ -1,30 +1,31 @@
-// Background dekoratif: blob gradient yang melayang pelan + partikel kecil
-// yang naik ke atas. Fixed di belakang seluruh halaman (pointer-events-none
-// biar tidak menghalangi klik), murni CSS animation — tidak perlu hooks,
-// jadi aman dipakai sebagai Server Component.
+import { Compass, BookOpen, GraduationCap, HeartPulse, FileCheck2 } from "lucide-react";
+import ConstellationCanvas from "@/components/ConstellationCanvas";
 
-interface Particle {
+// Background dekoratif untuk seluruh halaman:
+// 1. Warna dasar cream (dibundel di sini, bukan di wrapper halaman, supaya
+//    tidak menutupi layer ini — lihat catatan di page.tsx).
+// 2. Jaringan titik yang bergerak & saling terhubung (ConstellationCanvas),
+//    kesan "data/analitik" yang nyambung ke tema aplikasi asesmen.
+// 3. Ikon-ikon tema BK yang melayang pelan — Compass-nya berputar seperti
+//    kompas asli, menyambung ke fitur Asesmen Minat RMIB.
+// Semuanya fixed di belakang konten, pointer-events-none, dan otomatis
+// nonaktif kalau user mengaktifkan "reduce motion".
+
+interface FloatingIcon {
+  Icon: typeof Compass;
+  top: string;
   left: string;
   size: number;
   duration: number;
-  delay: number;
+  motion: "spin" | "drift-a" | "drift-b" | "drift-c";
 }
 
-// Posisi & timing partikel dibuat tetap (bukan Math.random()) supaya hasil
-// render di server dan di client sama persis — menghindari hydration mismatch.
-const PARTICLES: Particle[] = [
-  { left: "4%", size: 5, duration: 16, delay: 0 },
-  { left: "12%", size: 3, duration: 21, delay: 3 },
-  { left: "21%", size: 6, duration: 18, delay: 1.5 },
-  { left: "30%", size: 4, duration: 24, delay: 5 },
-  { left: "39%", size: 3, duration: 19, delay: 2 },
-  { left: "48%", size: 5, duration: 22, delay: 6 },
-  { left: "57%", size: 4, duration: 17, delay: 0.5 },
-  { left: "66%", size: 6, duration: 25, delay: 4 },
-  { left: "74%", size: 3, duration: 20, delay: 2.5 },
-  { left: "83%", size: 5, duration: 23, delay: 7 },
-  { left: "91%", size: 4, duration: 18, delay: 1 },
-  { left: "97%", size: 3, duration: 26, delay: 4.5 },
+const FLOATING_ICONS: FloatingIcon[] = [
+  { Icon: Compass, top: "10%", left: "6%", size: 72, duration: 46, motion: "spin" },
+  { Icon: BookOpen, top: "68%", left: "10%", size: 46, duration: 24, motion: "drift-a" },
+  { Icon: GraduationCap, top: "16%", left: "88%", size: 58, duration: 28, motion: "drift-b" },
+  { Icon: HeartPulse, top: "58%", left: "92%", size: 42, duration: 22, motion: "drift-c" },
+  { Icon: FileCheck2, top: "86%", left: "48%", size: 40, duration: 26, motion: "drift-a" },
 ];
 
 export default function AnimatedBackground() {
@@ -33,25 +34,22 @@ export default function AnimatedBackground() {
       className="fixed inset-0 -z-10 overflow-hidden pointer-events-none bg-[#FBF8F2]"
       aria-hidden="true"
     >
-      {/* Blob besar yang melayang pelan */}
-      <div className="absolute -top-32 -left-24 w-[32rem] h-[32rem] rounded-full bg-primary-700/10 blur-3xl bg-drift-a" />
-      <div className="absolute top-1/3 -right-32 w-[28rem] h-[28rem] rounded-full bg-[#F4A93B]/15 blur-3xl bg-drift-b" />
-      <div className="absolute bottom-0 left-1/4 w-[26rem] h-[26rem] rounded-full bg-primary-500/10 blur-3xl bg-drift-c" />
-      <div className="absolute top-2/3 right-1/4 w-[20rem] h-[20rem] rounded-full bg-primary-700/10 blur-3xl bg-drift-b" />
+      {/* Aksen warna halus di belakang, cuma sebagai lapisan kedalaman */}
+      <div className="absolute -top-32 -left-24 w-[30rem] h-[30rem] rounded-full bg-primary-700/[0.06] blur-3xl bg-drift-a" />
+      <div className="absolute bottom-0 -right-24 w-[26rem] h-[26rem] rounded-full bg-[#F4A93B]/[0.08] blur-3xl bg-drift-b" />
 
-      {/* Partikel kecil naik dari bawah ke atas */}
-      {PARTICLES.map((p, i) => (
-        <span
+      {/* Jaringan titik bergerak */}
+      <ConstellationCanvas />
+
+      {/* Ikon tema BK melayang pelan */}
+      {FLOATING_ICONS.map(({ Icon, top, left, size, duration, motion }, i) => (
+        <div
           key={i}
-          className="absolute bottom-0 rounded-full bg-primary-700/25 bg-particle"
-          style={{
-            left: p.left,
-            width: p.size,
-            height: p.size,
-            animationDuration: `${p.duration}s`,
-            animationDelay: `${p.delay}s`,
-          }}
-        />
+          className={`absolute text-primary-700/[0.09] icon-${motion}`}
+          style={{ top, left, animationDuration: `${duration}s` }}
+        >
+          <Icon size={size} strokeWidth={1.1} />
+        </div>
       ))}
 
       <style>{`
@@ -64,26 +62,30 @@ export default function AnimatedBackground() {
           0%, 100% { transform: translate(0, 0) scale(1); }
           50% { transform: translate(-50px, 40px) scale(1.1); }
         }
-        @keyframes bg-drift-c {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          50% { transform: translate(30px, -40px) scale(1.05); }
+        @keyframes icon-spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
         }
-        @keyframes bg-particle {
-          0% { transform: translateY(0) scale(1); opacity: 0; }
-          10% { opacity: 0.6; }
-          90% { opacity: 0.25; }
-          100% { transform: translateY(-105vh) scale(1.4); opacity: 0; }
+        @keyframes icon-drift-a {
+          0%, 100% { transform: translate(0, 0) rotate(0deg); }
+          50% { transform: translate(18px, -22px) rotate(6deg); }
+        }
+        @keyframes icon-drift-b {
+          0%, 100% { transform: translate(0, 0) rotate(0deg); }
+          50% { transform: translate(-20px, 18px) rotate(-8deg); }
+        }
+        @keyframes icon-drift-c {
+          0%, 100% { transform: translate(0, 0) rotate(0deg); }
+          50% { transform: translate(16px, 20px) rotate(5deg); }
         }
         .bg-drift-a { animation: bg-drift-a 22s ease-in-out infinite; }
         .bg-drift-b { animation: bg-drift-b 26s ease-in-out infinite; }
-        .bg-drift-c { animation: bg-drift-c 30s ease-in-out infinite; }
-        .bg-particle {
-          animation-name: bg-particle;
-          animation-timing-function: linear;
-          animation-iteration-count: infinite;
-        }
+        .icon-spin { animation-name: icon-spin; animation-timing-function: linear; animation-iteration-count: infinite; }
+        .icon-drift-a { animation-name: icon-drift-a; animation-timing-function: ease-in-out; animation-iteration-count: infinite; }
+        .icon-drift-b { animation-name: icon-drift-b; animation-timing-function: ease-in-out; animation-iteration-count: infinite; }
+        .icon-drift-c { animation-name: icon-drift-c; animation-timing-function: ease-in-out; animation-iteration-count: infinite; }
         @media (prefers-reduced-motion: reduce) {
-          .bg-drift-a, .bg-drift-b, .bg-drift-c, .bg-particle {
+          .bg-drift-a, .bg-drift-b, .icon-spin, .icon-drift-a, .icon-drift-b, .icon-drift-c {
             animation: none !important;
           }
         }
