@@ -2,13 +2,33 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, Pencil, Trash2, Loader2 } from "lucide-react";
+import { Plus, Pencil, Trash2, Loader2, Upload } from "lucide-react";
 import {
   fetchAssessmentsForAdmin,
   fetchAllQuestions,
   deleteQuestion,
+  fetchDimensionsForAssessment,
 } from "@/lib/assessmentService";
-import { Assessment, Question } from "@/types";
+import { Assessment, Dimension, Question, QuestionOption } from "@/types";
+import ImportQuestionsModal from "@/components/ImportQuestionsModal";
+
+const OPTIONS_BY_TYPE: Record<string, QuestionOption[]> = {
+  study_plan: [
+    { label: "Ya", value: 1 },
+    { label: "Tidak", value: 0 },
+  ],
+  learning_style: [
+    { label: "Ya", value: 1 },
+    { label: "Tidak", value: 0 },
+  ],
+  stress_scale: [
+    { label: "Sangat Setuju", value: 4 },
+    { label: "Setuju", value: 3 },
+    { label: "Tidak Setuju", value: 2 },
+    { label: "Sangat Tidak Setuju", value: 1 },
+  ],
+};
+const IMPORTABLE_TYPES = Object.keys(OPTIONS_BY_TYPE);
 
 export default function ManageQuestionsPage() {
   const [assessments, setAssessments] = useState<
@@ -16,8 +36,10 @@ export default function ManageQuestionsPage() {
   >([]);
   const [assessmentId, setAssessmentId] = useState<string>("");
   const [questions, setQuestions] = useState<Question[]>([]);
+  const [dimensions, setDimensions] = useState<Dimension[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [showImportModal, setShowImportModal] = useState(false);
 
   useEffect(() => {
     fetchAssessmentsForAdmin().then((data) => {
@@ -30,10 +52,18 @@ export default function ManageQuestionsPage() {
   useEffect(() => {
     if (!assessmentId) return;
     setLoading(true);
-    fetchAllQuestions(assessmentId)
-      .then(setQuestions)
+    Promise.all([fetchAllQuestions(assessmentId), fetchDimensionsForAssessment(assessmentId)])
+      .then(([q, d]) => {
+        setQuestions(q);
+        setDimensions(d);
+      })
       .finally(() => setLoading(false));
   }, [assessmentId]);
+
+  const reloadQuestions = () => {
+    if (!assessmentId) return;
+    fetchAllQuestions(assessmentId).then(setQuestions);
+  };
 
   const handleDelete = async (id: string) => {
     if (!confirm("Hapus soal ini? Tindakan ini tidak bisa dibatalkan.")) return;
@@ -50,6 +80,8 @@ export default function ManageQuestionsPage() {
 
   const selectedAssessment = assessments.find((a) => a.id === assessmentId);
   const isRmib = selectedAssessment?.assessment_type === "rmib";
+  const isImportable =
+    !!selectedAssessment && IMPORTABLE_TYPES.includes(selectedAssessment.assessment_type);
 
   return (
     <div className="p-8 max-w-5xl">
@@ -59,13 +91,24 @@ export default function ManageQuestionsPage() {
           <p className="text-muted text-sm">Tambah, edit, atau hapus soal per asesmen.</p>
         </div>
         {assessmentId && (
-          <Link
-            href={`/admin/questions/new?assessmentId=${assessmentId}`}
-            className="flex items-center gap-2 bg-primary-700 hover:bg-primary-800 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
-          >
-            <Plus size={16} />
-            Tambah Soal
-          </Link>
+          <div className="flex items-center gap-2">
+            {isImportable && (
+              <button
+                onClick={() => setShowImportModal(true)}
+                className="flex items-center gap-2 bg-white border border-primary-100 hover:bg-surface text-ink text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
+              >
+                <Upload size={16} />
+                Import dari Excel
+              </button>
+            )}
+            <Link
+              href={`/admin/questions/new?assessmentId=${assessmentId}`}
+              className="flex items-center gap-2 bg-primary-700 hover:bg-primary-800 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
+            >
+              <Plus size={16} />
+              Tambah Soal
+            </Link>
+          </div>
         )}
       </div>
 
@@ -82,6 +125,12 @@ export default function ManageQuestionsPage() {
             </option>
           ))}
         </select>
+        {!isImportable && selectedAssessment && (
+          <p className="text-xs text-muted mt-1.5">
+            Import Excel belum tersedia untuk tipe &quot;{selectedAssessment.assessment_type}
+            &quot; — pakai form &quot;Tambah Soal&quot; manual untuk tipe ini.
+          </p>
+        )}
       </div>
 
       <div className="bg-white border border-primary-100 rounded-2xl overflow-hidden">
@@ -140,6 +189,18 @@ export default function ManageQuestionsPage() {
           </div>
         )}
       </div>
+
+      {showImportModal && selectedAssessment && (
+        <ImportQuestionsModal
+          assessmentId={assessmentId}
+          assessmentType={selectedAssessment.assessment_type}
+          dimensions={dimensions}
+          existingQuestions={questions}
+          options={OPTIONS_BY_TYPE[selectedAssessment.assessment_type] ?? []}
+          onClose={() => setShowImportModal(false)}
+          onImported={reloadQuestions}
+        />
+      )}
     </div>
   );
 }
