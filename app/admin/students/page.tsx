@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ChevronRight, Loader2, Plus, Search, Upload } from "lucide-react";
+import { ChevronRight, Loader2, Plus, Search, Upload, Trash2 } from "lucide-react";
 import { fetchAllStudents } from "@/lib/assessmentService";
 import AddStudentModal from "@/components/AddStudentModal";
 import ImportStudentsModal from "@/components/ImportStudentsModal";
@@ -14,6 +14,7 @@ export default function ManageStudentsPage() {
   const [classFilter, setClassFilter] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const loadStudents = () => {
     setLoading(true);
@@ -25,6 +26,27 @@ export default function ManageStudentsPage() {
   useEffect(() => {
     loadStudents();
   }, []);
+
+  const handleDelete = async (id: string, name: string) => {
+    if (
+      !confirm(
+        `Hapus siswa "${name}"? Akun login dan seluruh datanya akan dihapus permanen. Tindakan ini tidak bisa dibatalkan.`
+      )
+    ) {
+      return;
+    }
+    setDeletingId(id);
+    try {
+      const res = await fetch(`/api/students/${id}`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Gagal menghapus siswa.");
+      setStudents((prev) => prev.filter((s) => s.id !== id));
+    } catch (err: any) {
+      alert(err.message ?? "Gagal menghapus siswa.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const classOptions = Array.from(
     new Set(students.map((s) => s.class_name).filter(Boolean))
@@ -109,7 +131,7 @@ export default function ManageStudentsPage() {
                   <th className="px-5 py-2.5 font-medium">Kelas</th>
                   <th className="px-5 py-2.5 font-medium">NIS</th>
                   <th className="px-5 py-2.5 font-medium">Email</th>
-                  <th className="px-5 py-2.5 font-medium w-10"></th>
+                  <th className="px-5 py-2.5 font-medium w-20">Aksi</th>
                 </tr>
               </thead>
               <tbody>
@@ -124,9 +146,27 @@ export default function ManageStudentsPage() {
                     <td className="px-5 py-3 text-muted">{s.nis ?? "-"}</td>
                     <td className="px-5 py-3 text-muted">{s.email}</td>
                     <td className="px-5 py-3">
-                      <Link href={`/admin/students/${s.id}`}>
-                        <ChevronRight size={16} className="text-muted" />
-                      </Link>
+                      <div className="flex items-center gap-2">
+                        <Link
+                          href={`/admin/students/${s.id}`}
+                          className="w-8 h-8 rounded-lg bg-primary-50 hover:bg-primary-100 flex items-center justify-center transition-colors"
+                          title="Lihat detail"
+                        >
+                          <ChevronRight size={14} className="text-primary-700" />
+                        </Link>
+                        <button
+                          onClick={() => handleDelete(s.id, s.full_name)}
+                          disabled={deletingId === s.id}
+                          className="w-8 h-8 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors disabled:opacity-50"
+                          title="Hapus siswa"
+                        >
+                          {deletingId === s.id ? (
+                            <Loader2 size={14} className="animate-spin text-red-600" />
+                          ) : (
+                            <Trash2 size={14} color="#dc2626" />
+                          )}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
