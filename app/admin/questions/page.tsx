@@ -11,6 +11,8 @@ import {
 } from "@/lib/assessmentService";
 import { Assessment, Dimension, Question, QuestionOption } from "@/types";
 import ImportQuestionsModal from "@/components/ImportQuestionsModal";
+import ImportDiscQuestionsModal from "@/components/ImportDiscQuestionsModal";
+import ImportRmibQuestionsModal from "@/components/ImportRmibQuestionsModal";
 
 const OPTIONS_BY_TYPE: Record<string, QuestionOption[]> = {
   study_plan: [
@@ -28,7 +30,7 @@ const OPTIONS_BY_TYPE: Record<string, QuestionOption[]> = {
     { label: "Sangat Tidak Setuju", value: 1 },
   ],
 };
-const IMPORTABLE_TYPES = Object.keys(OPTIONS_BY_TYPE);
+const DEFAULT_IMPORTABLE_TYPES = Object.keys(OPTIONS_BY_TYPE);
 
 export default function ManageQuestionsPage() {
   const [assessments, setAssessments] = useState<
@@ -79,9 +81,10 @@ export default function ManageQuestionsPage() {
   };
 
   const selectedAssessment = assessments.find((a) => a.id === assessmentId);
-  const isRmib = selectedAssessment?.assessment_type === "rmib";
-  const isImportable =
-    !!selectedAssessment && IMPORTABLE_TYPES.includes(selectedAssessment.assessment_type);
+  const assessmentType = selectedAssessment?.assessment_type ?? "";
+  const isRmib = assessmentType === "rmib";
+  const isDisc = assessmentType === "disc";
+  const isDefaultImportable = DEFAULT_IMPORTABLE_TYPES.includes(assessmentType);
 
   return (
     <div className="p-8 max-w-5xl">
@@ -92,15 +95,13 @@ export default function ManageQuestionsPage() {
         </div>
         {assessmentId && (
           <div className="flex items-center gap-2">
-            {isImportable && (
-              <button
-                onClick={() => setShowImportModal(true)}
-                className="flex items-center gap-2 bg-white border border-primary-100 hover:bg-surface text-ink text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
-              >
-                <Upload size={16} />
-                Import dari Excel
-              </button>
-            )}
+            <button
+              onClick={() => setShowImportModal(true)}
+              className="flex items-center gap-2 bg-white border border-primary-100 hover:bg-surface text-ink text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
+            >
+              <Upload size={16} />
+              Import dari Excel
+            </button>
             <Link
               href={`/admin/questions/new?assessmentId=${assessmentId}`}
               className="flex items-center gap-2 bg-primary-700 hover:bg-primary-800 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
@@ -125,12 +126,6 @@ export default function ManageQuestionsPage() {
             </option>
           ))}
         </select>
-        {!isImportable && selectedAssessment && (
-          <p className="text-xs text-muted mt-1.5">
-            Import Excel belum tersedia untuk tipe &quot;{selectedAssessment.assessment_type}
-            &quot; — pakai form &quot;Tambah Soal&quot; manual untuk tipe ini.
-          </p>
-        )}
       </div>
 
       <div className="bg-white border border-primary-100 rounded-2xl overflow-hidden">
@@ -190,16 +185,52 @@ export default function ManageQuestionsPage() {
         )}
       </div>
 
-      {showImportModal && selectedAssessment && (
+      {showImportModal && selectedAssessment && isDefaultImportable && (
         <ImportQuestionsModal
           assessmentId={assessmentId}
-          assessmentType={selectedAssessment.assessment_type}
+          assessmentType={assessmentType}
           dimensions={dimensions}
           existingQuestions={questions}
-          options={OPTIONS_BY_TYPE[selectedAssessment.assessment_type] ?? []}
+          options={OPTIONS_BY_TYPE[assessmentType] ?? []}
           onClose={() => setShowImportModal(false)}
           onImported={reloadQuestions}
         />
+      )}
+
+      {showImportModal && selectedAssessment && isDisc && (
+        <ImportDiscQuestionsModal
+          assessmentId={assessmentId}
+          dimensions={dimensions}
+          existingQuestions={questions}
+          onClose={() => setShowImportModal(false)}
+          onImported={reloadQuestions}
+        />
+      )}
+
+      {showImportModal && selectedAssessment && isRmib && (
+        <ImportRmibQuestionsModal
+          assessmentId={assessmentId}
+          dimensions={dimensions}
+          existingQuestions={questions}
+          onClose={() => setShowImportModal(false)}
+          onImported={reloadQuestions}
+        />
+      )}
+
+      {showImportModal && selectedAssessment && !isDefaultImportable && !isDisc && !isRmib && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm p-6 text-center">
+            <p className="text-sm text-ink mb-4">
+              Import Excel belum tersedia untuk tipe asesmen &quot;{assessmentType}&quot;.
+            </p>
+            <button
+              onClick={() => setShowImportModal(false)}
+              className="w-full bg-primary-700 hover:bg-primary-800 text-white font-semibold text-sm rounded-xl py-2.5 transition-colors"
+            >
+              Tutup
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
