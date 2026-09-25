@@ -2,7 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { GraduationCap, LayoutDashboard, ListChecks, Users, FileBarChart, LogOut, Loader2 } from "lucide-react";
+import {
+  GraduationCap,
+  LayoutDashboard,
+  ListChecks,
+  Users,
+  FileBarChart,
+  LogOut,
+  Loader2,
+} from "lucide-react";
 import { useAdminAuth } from "@/lib/useAdminAuth";
 
 const NAV_ITEMS = [
@@ -28,7 +36,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   return (
     <div className="min-h-screen flex">
-      <aside className="w-64 bg-primary-800 flex flex-col">
+      {/* sticky + h-screen: sidebar tetap setinggi layar & diem di tempat,
+          nggak ikut memanjang meski konten di kanan lebih tinggi (misal
+          tabel dengan pagination). */}
+      <aside className="w-64 bg-primary-800 flex flex-col sticky top-0 h-screen self-start">
         <div className="flex items-center gap-2.5 px-5 py-5 border-b border-white/10">
           <div className="w-9 h-9 rounded-xl bg-white/15 flex items-center justify-center">
             <GraduationCap color="#fff" size={18} />

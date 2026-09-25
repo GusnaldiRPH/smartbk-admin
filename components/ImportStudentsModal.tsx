@@ -8,8 +8,13 @@ interface ParsedRow {
   full_name: string;
   email: string;
   password: string;
-  class_name?: string;
-  nis?: string;
+  class_name: string;
+  nis: string;
+  jenis_kelamin: string;
+  no_telepon: string;
+  alamat: string;
+  tempat_lahir: string;
+  tanggal_lahir: string;
   rowNum: number;
   error?: string;
 }
@@ -32,6 +37,11 @@ const HEADER_ALIASES: Record<string, string[]> = {
   password: ["password", "kata sandi"],
   class_name: ["kelas"],
   nis: ["nis"],
+  jenis_kelamin: ["jenis kelamin"],
+  no_telepon: ["no telepon", "no. telepon", "telepon"],
+  alamat: ["alamat"],
+  tempat_lahir: ["tempat lahir"],
+  tanggal_lahir: ["tanggal lahir"],
 };
 
 function normalizeKey(key: string) {
@@ -52,6 +62,11 @@ function findField(row: Record<string, any>, field: keyof typeof HEADER_ALIASES)
   return "";
 }
 
+function jkValid(v: string) {
+  const s = v.toLowerCase();
+  return ["l", "p", "laki-laki", "laki laki", "pria", "perempuan", "wanita"].includes(s);
+}
+
 export default function ImportStudentsModal({ onClose, onImported }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [parsedRows, setParsedRows] = useState<ParsedRow[]>([]);
@@ -66,8 +81,13 @@ export default function ImportStudentsModal({ onClose, onImported }: Props) {
         "Nama Lengkap": "Contoh Siswa",
         Email: "contoh.siswa@sekolah.sch.id",
         Password: "password123",
-        Kelas: "XI IPA 1",
+        Kelas: "XI RPL 2",
         NIS: "12345",
+        "Jenis Kelamin": "L",
+        "No Telepon": "",
+        Alamat: "",
+        "Tempat Lahir": "",
+        "Tanggal Lahir": "",
       },
     ]);
     const wb = XLSX.utils.book_new();
@@ -103,21 +123,30 @@ export default function ImportStudentsModal({ onClose, onImported }: Props) {
           const password = findField(row, "password");
           const class_name = findField(row, "class_name");
           const nis = findField(row, "nis");
+          const jenis_kelamin = findField(row, "jenis_kelamin");
+          const no_telepon = findField(row, "no_telepon");
+          const alamat = findField(row, "alamat");
+          const tempat_lahir = findField(row, "tempat_lahir");
+          const tanggal_lahir = findField(row, "tanggal_lahir");
 
           let error: string | undefined;
           if (!full_name) error = "Nama Lengkap kosong.";
           else if (!email) error = "Email kosong.";
-          else if (!password) error = "Password kosong.";
-          else if (password.length < 6) error = "Password minimal 6 karakter.";
+          else if (!nis) error = "NIS kosong.";
+          else if (!class_name) error = "Kelas kosong.";
+          else if (!jenis_kelamin || !jkValid(jenis_kelamin)) error = "Jenis Kelamin wajib diisi (L/P).";
+          else if (password && password.length < 6) error = "Password minimal 6 karakter.";
 
-          return { full_name, email, password, class_name, nis, rowNum: idx + 2, error };
+          return {
+            full_name, email, password, class_name, nis, jenis_kelamin,
+            no_telepon, alamat, tempat_lahir, tanggal_lahir,
+            rowNum: idx + 2, error,
+          };
         });
 
         setParsedRows(parsed);
       } catch {
-        setSummaryError(
-          "Gagal membaca file. Pastikan formatnya .xlsx, .xls, atau .csv sesuai template."
-        );
+        setSummaryError("Gagal membaca file. Pastikan formatnya .xlsx, .xls, atau .csv sesuai template.");
         setParsedRows([]);
       }
     };
@@ -139,9 +168,14 @@ export default function ImportStudentsModal({ onClose, onImported }: Props) {
           students: validRows.map((r) => ({
             full_name: r.full_name,
             email: r.email,
-            password: r.password,
+            password: r.password || undefined,
             class_name: r.class_name,
             nis: r.nis,
+            jenis_kelamin: r.jenis_kelamin,
+            no_telepon: r.no_telepon || undefined,
+            alamat: r.alamat || undefined,
+            tempat_lahir: r.tempat_lahir || undefined,
+            tanggal_lahir: r.tanggal_lahir || undefined,
           })),
         }),
       });
@@ -167,18 +201,14 @@ export default function ImportStudentsModal({ onClose, onImported }: Props) {
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
       <div className="bg-white rounded-2xl w-full max-w-lg p-6 relative max-h-[85vh] overflow-y-auto">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 text-muted hover:text-ink"
-          aria-label="Tutup"
-        >
+        <button onClick={onClose} className="absolute top-4 right-4 text-muted hover:text-ink" aria-label="Tutup">
           <X size={18} />
         </button>
 
         <h2 className="text-lg font-bold text-ink mb-1">Import Siswa dari Excel</h2>
         <p className="text-muted text-sm mb-4">
-          Kolom yang dibutuhkan: <b>Nama Lengkap</b>, <b>Email</b>, <b>Password</b>. Kolom{" "}
-          <b>Kelas</b> dan <b>NIS</b> opsional.
+          Kolom wajib: <b>Nama Lengkap</b>, <b>Email</b>, <b>Kelas</b>, <b>NIS</b>, <b>Jenis Kelamin</b>.
+          <b> Password</b> hanya wajib untuk siswa yang belum punya akun. Kolom lain opsional.
         </p>
 
         <button
@@ -197,11 +227,8 @@ export default function ImportStudentsModal({ onClose, onImported }: Props) {
                 {fileName || "Klik untuk pilih file .xlsx / .xls / .csv"}
               </span>
               <input
-                ref={fileInputRef}
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                onChange={handleFileChange}
-                className="hidden"
+                ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv"
+                onChange={handleFileChange} className="hidden"
               />
             </label>
 
@@ -275,15 +302,11 @@ export default function ImportStudentsModal({ onClose, onImported }: Props) {
             <div className="flex items-center gap-4 mb-4">
               <div className="flex items-center gap-1.5 text-sm">
                 <CheckCircle2 size={16} className="text-primary-700" />
-                <span className="font-semibold text-ink">
-                  {results.filter((r) => r.success).length} berhasil
-                </span>
+                <span className="font-semibold text-ink">{results.filter((r) => r.success).length} berhasil</span>
               </div>
               <div className="flex items-center gap-1.5 text-sm">
                 <XCircle size={16} className="text-red-600" />
-                <span className="font-semibold text-ink">
-                  {results.filter((r) => !r.success).length} gagal
-                </span>
+                <span className="font-semibold text-ink">{results.filter((r) => !r.success).length} gagal</span>
               </div>
             </div>
 

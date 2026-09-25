@@ -1,11 +1,27 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ChevronRight, Loader2, Plus, Search, Upload, Trash2 } from "lucide-react";
+import {
+  ChevronRight,
+  Loader2,
+  Plus,
+  Search,
+  Upload,
+  Trash2,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
+  ChevronLeft,
+} from "lucide-react";
 import { fetchAllStudents } from "@/lib/assessmentService";
 import AddStudentModal from "@/components/AddStudentModal";
 import ImportStudentsModal from "@/components/ImportStudentsModal";
+
+type SortKey = "name" | "class" | "nis" | "email";
+type SortDir = "asc" | "desc";
+
+const PAGE_SIZE = 10;
 
 export default function ManageStudentsPage() {
   const [students, setStudents] = useState<any[]>([]);
@@ -15,6 +31,10 @@ export default function ManageStudentsPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [page, setPage] = useState(1);
 
   const loadStudents = () => {
     setLoading(true);
@@ -48,17 +68,60 @@ export default function ManageStudentsPage() {
     }
   };
 
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+    setPage(1);
+  };
+
   const classOptions = Array.from(
     new Set(students.map((s) => s.class_name).filter(Boolean))
   ).sort();
 
-  const filtered = students.filter((s) => {
-    const matchesSearch = `${s.full_name} ${s.email} ${s.class_name ?? ""} ${s.nis ?? ""}`
-      .toLowerCase()
-      .includes(search.toLowerCase());
-    const matchesClass = !classFilter || s.class_name === classFilter;
-    return matchesSearch && matchesClass;
-  });
+  const filtered = useMemo(
+    () =>
+      students.filter((s) => {
+        const matchesSearch = `${s.full_name} ${s.email} ${s.class_name ?? ""} ${s.nis ?? ""}`
+          .toLowerCase()
+          .includes(search.toLowerCase());
+        const matchesClass = !classFilter || s.class_name === classFilter;
+        return matchesSearch && matchesClass;
+      }),
+    [students, search, classFilter]
+  );
+
+  const sorted = useMemo(() => {
+    const fieldMap: Record<SortKey, string> = {
+      name: "full_name",
+      class: "class_name",
+      nis: "nis",
+      email: "email",
+    };
+    const field = fieldMap[sortKey];
+    const arr = [...filtered];
+    arr.sort((a, b) => {
+      const cmp = String(a[field] ?? "").localeCompare(String(b[field] ?? ""), "id");
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+    return arr;
+  }, [filtered, sortKey, sortDir]);
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageItems = sorted.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  const SortIcon = ({ column }: { column: SortKey }) => {
+    if (sortKey !== column) return <ArrowUpDown size={13} className="text-muted/50" />;
+    return sortDir === "asc" ? (
+      <ArrowUp size={13} className="text-primary-700" />
+    ) : (
+      <ArrowDown size={13} className="text-primary-700" />
+    );
+  };
 
   return (
     <div className="p-8 max-w-4xl">
@@ -91,14 +154,20 @@ export default function ManageStudentsPage() {
           <input
             type="text"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
             placeholder="Cari nama, email, kelas, atau NIS..."
             className="w-full bg-white border border-primary-100 rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none focus:border-primary-700"
           />
         </div>
         <select
           value={classFilter}
-          onChange={(e) => setClassFilter(e.target.value)}
+          onChange={(e) => {
+            setClassFilter(e.target.value);
+            setPage(1);
+          }}
           disabled={classOptions.length === 0}
           className="bg-white border border-primary-100 rounded-xl px-3.5 py-2.5 text-sm min-w-[160px] outline-none focus:border-primary-700 disabled:bg-surface disabled:text-muted"
         >
@@ -116,26 +185,58 @@ export default function ManageStudentsPage() {
           <div className="px-5 py-8 flex justify-center">
             <Loader2 className="animate-spin text-primary-700" size={22} />
           </div>
-        ) : filtered.length === 0 ? (
+        ) : sorted.length === 0 ? (
           <p className="text-muted text-sm px-5 py-8 text-center">
             {students.length === 0
               ? "Belum ada siswa. Klik \"Tambah Siswa\" untuk menambahkan."
               : "Tidak ada siswa ditemukan."}
           </p>
         ) : (
-          <div className="max-h-[60vh] overflow-y-auto">
+          <>
             <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-white z-10">
+              <thead>
                 <tr className="text-left text-muted text-xs border-b border-primary-50">
-                  <th className="px-5 py-2.5 font-medium">Nama</th>
-                  <th className="px-5 py-2.5 font-medium">Kelas</th>
-                  <th className="px-5 py-2.5 font-medium">NIS</th>
-                  <th className="px-5 py-2.5 font-medium">Email</th>
+                  <th className="px-5 py-2.5 font-medium">
+                    <button
+                      onClick={() => handleSort("name")}
+                      className="flex items-center gap-1 hover:text-ink transition-colors"
+                    >
+                      Nama
+                      <SortIcon column="name" />
+                    </button>
+                  </th>
+                  <th className="px-5 py-2.5 font-medium">
+                    <button
+                      onClick={() => handleSort("class")}
+                      className="flex items-center gap-1 hover:text-ink transition-colors"
+                    >
+                      Kelas
+                      <SortIcon column="class" />
+                    </button>
+                  </th>
+                  <th className="px-5 py-2.5 font-medium">
+                    <button
+                      onClick={() => handleSort("nis")}
+                      className="flex items-center gap-1 hover:text-ink transition-colors"
+                    >
+                      NIS
+                      <SortIcon column="nis" />
+                    </button>
+                  </th>
+                  <th className="px-5 py-2.5 font-medium">
+                    <button
+                      onClick={() => handleSort("email")}
+                      className="flex items-center gap-1 hover:text-ink transition-colors"
+                    >
+                      Email
+                      <SortIcon column="email" />
+                    </button>
+                  </th>
                   <th className="px-5 py-2.5 font-medium w-20">Aksi</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((s) => (
+                {pageItems.map((s) => (
                   <tr key={s.id} className="border-b border-primary-50 last:border-0">
                     <td className="px-5 py-3 font-medium text-ink">
                       <Link href={`/admin/students/${s.id}`} className="hover:text-primary-700">
@@ -172,7 +273,34 @@ export default function ManageStudentsPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+
+            {/* Pagination */}
+            <div className="flex items-center justify-between px-5 py-3 border-t border-primary-50 text-xs text-muted">
+              <span>
+                Menampilkan {(safePage - 1) * PAGE_SIZE + 1}-
+                {Math.min(safePage * PAGE_SIZE, sorted.length)} dari {sorted.length} siswa
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={safePage === 1}
+                  className="w-7 h-7 rounded-lg border border-primary-100 flex items-center justify-center disabled:opacity-40 hover:bg-surface transition-colors"
+                >
+                  <ChevronLeft size={14} />
+                </button>
+                <span className="px-2 font-medium text-ink">
+                  {safePage} / {totalPages}
+                </span>
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={safePage === totalPages}
+                  className="w-7 h-7 rounded-lg border border-primary-100 flex items-center justify-center disabled:opacity-40 hover:bg-surface transition-colors"
+                >
+                  <ChevronRight size={14} />
+                </button>
+              </div>
+            </div>
+          </>
         )}
       </div>
 

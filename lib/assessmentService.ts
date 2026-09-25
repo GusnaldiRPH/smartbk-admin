@@ -138,21 +138,48 @@ export async function deleteDimension(id: string) {
   if (error) throw error;
 }
 
-/** Semua siswa (role = "siswa"). */
+/** Semua siswa (role = "siswa"), dengan kelas dari riwayat_kelas (bukan dari profiles.class_name yang bisa basi). */
 export async function fetchAllStudents() {
-  const { data, error } = await supabase
+  const { data: profiles, error } = await supabase
     .from("profiles")
     .select("id, full_name, email, class_name, nis")
     .eq("role", "siswa")
     .order("full_name");
   if (error) throw error;
-  return data;
+
+  const { data: siswaRows } = await supabase.from("siswa").select("id, user_id, nis");
+  const { data: kelasRows } = await supabase.from("kelas_siswa_aktif").select("siswa_id, kelas_nama");
+
+  const kelasBySiswaId = new Map<string, string>(
+    (kelasRows ?? []).map((k: { siswa_id: string; kelas_nama: string }) => [k.siswa_id, k.kelas_nama])
+  );
+  const siswaByUserId = new Map<string, { id: string; user_id: string; nis: string }>(
+    (siswaRows ?? []).map((s: { id: string; user_id: string; nis: string }) => [s.user_id, s])
+  );
+
+  return (profiles ?? []).map(
+    (p: { id: string; full_name: string; email: string; class_name: string | null; nis: string | null }) => {
+      const siswa = siswaByUserId.get(p.id);
+      const kelasNama = siswa ? kelasBySiswaId.get(siswa.id) : undefined;
+      return { ...p, class_name: kelasNama ?? p.class_name, nis: siswa?.nis ?? p.nis };
+    }
+  );
 }
 
 export async function fetchStudentById(id: string) {
-  const { data, error } = await supabase.from("profiles").select("*").eq("id", id).single();
+  const { data: profile, error } = await supabase.from("profiles").select("*").eq("id", id).single();
   if (error) throw error;
-  return data;
+
+  const { data: siswa } = await supabase.from("siswa").select("*").eq("user_id", id).maybeSingle();
+  if (!siswa) return profile;
+
+  const { data: kelas } = await supabase
+    .from("kelas_siswa_aktif")
+    .select("kelas_nama")
+    .eq("siswa_id", siswa.id)
+    .maybeSingle();
+
+  return { ...profile, class_name: kelas?.kelas_nama ?? profile.class_name, nis: siswa.nis, siswa };
 }
 
 /** Riwayat hasil asesmen 1 siswa, dengan assessment_type ikut untuk render breakdown per-dimensi. */

@@ -1,109 +1,82 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { normalizeJenisKelamin, normalizeTanggal, upsertSiswaDanKelas } from "@/lib/adminKelasHelper";
 
 interface StudentRow {
   full_name: string;
   email: string;
-  password: string;
+  password?: string;
   class_name?: string;
   nis?: string;
+  jenis_kelamin?: string;
+  no_telepon?: string;
+  alamat?: string;
+  tempat_lahir?: string;
+  tanggal_lahir?: string;
 }
-
-interface RowResult {
-  row: number;
-  email: string;
-  success: boolean;
-  error?: string;
-}
-
-const MAX_ROWS = 200;
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    const students: StudentRow[] = body.students ?? [];
-
+    const { students } = (await req.json()) as { students: StudentRow[] };
     if (!Array.isArray(students) || students.length === 0) {
       return NextResponse.json({ error: "Tidak ada data siswa yang dikirim." }, { status: 400 });
     }
-    if (students.length > MAX_ROWS) {
-      return NextResponse.json(
-        { error: `Maksimal ${MAX_ROWS} siswa per import. Bagi file jadi beberapa bagian.` },
-        { status: 400 }
-      );
-    }
 
-    const results: RowResult[] = [];
+    const results: { row: number; email: string; success: boolean; error?: string }[] = [];
 
-    // Diproses satu-satu (bukan paralel) supaya kalau ada 1 baris gagal,
-    // baris lain tetap lanjut diproses tanpa saling mengganggu rate limit Supabase Auth.
     for (let i = 0; i < students.length; i++) {
-      const s = students[i];
-      const rowNum = i + 2; // +2 karena baris 1 di Excel = header
+      const r = students[i];
+      const rowNum = i + 2;
+      const email = r.email?.trim().toLowerCase();
 
-      if (!s.full_name?.trim() || !s.email?.trim() || !s.password?.trim()) {
-        results.push({
-          row: rowNum,
-          email: s.email ?? "-",
-          success: false,
-          error: "Nama, email, atau password kosong.",
+      try {
+        if (!r.full_name?.trim() || !email) throw new Error("Nama atau email kosong.");
+        if (!r.nis?.trim()) throw new Error("NIS kosong.");
+        if (!r.class_name?.trim()) throw new Error("Kelas kosong.");
+        const jk = normalizeJenisKelamin(r.jenis_kelamin);
+        if (!jk) throw new Error("Jenis Kelamin wajib diisi (L/P).");
+        const tgl = normalizeTanggal(r.tanggal_lahir);
+        if (!tgl.ok) throw new Error("Format Tanggal Lahir tidak valid.");
+
+        const { data: existing } = await supabaseAdmin
+          .from("profiles").select("id, role").ilike("email", email).maybeSingle();
+
+        let userId: string;
+        if (existing) {
+          if (existing.role === "admin") throw new Error("Email ini adalah akun admin, bukan siswa.");
+          userId = existing.id;
+        } else {
+          if (!r.password || r.password.length < 6) {
+            throw new Error("Akun belum ada, Password wajib diisi (minimal 6 karakter).");
+          }
+          const { data: userData, error: userError } = await supabaseAdmin.auth.admin.createUser({
+            email, password: r.password, email_confirm: true,
+          });
+          if (userError || !userData.user) throw new Error(userError?.message ?? "Gagal membuat akun.");
+          userId = userData.user.id;
+        }
+
+        const { error: profileError } = await supabaseAdmin.from("profiles").upsert({
+          id: userId, email, full_name: r.full_name.trim(), role: "siswa",
+          class_name: r.class_name.trim(), nis: r.nis.trim(),
         });
-        continue;
-      }
-      if (s.password.length < 6) {
-        results.push({
-          row: rowNum,
-          email: s.email,
-          success: false,
-          error: "Password minimal 6 karakter.",
+        if (profileError) throw profileError;
+
+        await upsertSiswaDanKelas({
+          userId, nis: r.nis.trim(), nama: r.full_name.trim(), jenisKelamin: jk,
+          noTelepon: r.no_telepon?.trim() || null, alamat: r.alamat?.trim() || null,
+          tempatLahir: r.tempat_lahir?.trim() || null, tanggalLahir: tgl.value,
+          kelasText: r.class_name.trim(),
         });
-        continue;
+
+        results.push({ row: rowNum, email, success: true });
+      } catch (e: any) {
+        results.push({ row: rowNum, email: email ?? "-", success: false, error: e.message });
       }
-
-      const { data: userData, error: userError } = await supabaseAdmin.auth.admin.createUser({
-        email: s.email.trim(),
-        password: s.password,
-        email_confirm: true,
-      });
-
-      if (userError || !userData.user) {
-        results.push({
-          row: rowNum,
-          email: s.email,
-          success: false,
-          error: userError?.message ?? "Gagal membuat akun.",
-        });
-        continue;
-      }
-
-      const { error: profileError } = await supabaseAdmin.from("profiles").upsert({
-        id: userData.user.id,
-        email: s.email.trim(),
-        full_name: s.full_name.trim(),
-        role: "siswa",
-        class_name: s.class_name?.trim() || null,
-        nis: s.nis?.trim() || null,
-      });
-
-      if (profileError) {
-        await supabaseAdmin.auth.admin.deleteUser(userData.user.id);
-        results.push({ row: rowNum, email: s.email, success: false, error: profileError.message });
-        continue;
-      }
-
-      results.push({ row: rowNum, email: s.email, success: true });
     }
 
-    const successCount = results.filter((r) => r.success).length;
-    return NextResponse.json({
-      successCount,
-      failCount: results.length - successCount,
-      results,
-    });
+    return NextResponse.json({ results, successCount: results.filter((r) => r.success).length });
   } catch (err: any) {
-    return NextResponse.json(
-      { error: err.message ?? "Terjadi kesalahan tak terduga." },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: err.message ?? "Terjadi kesalahan tak terduga." }, { status: 500 });
   }
 }
