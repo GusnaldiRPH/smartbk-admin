@@ -13,6 +13,7 @@ import {
   ArrowDown,
   ArrowUpDown,
   ChevronLeft,
+  ArrowUpCircle,
 } from "lucide-react";
 import { fetchAllStudents } from "@/lib/assessmentService";
 import AddStudentModal from "@/components/AddStudentModal";
@@ -131,6 +132,13 @@ export default function ManageStudentsPage() {
           <p className="text-muted text-sm">Lihat data siswa dan riwayat hasil asesmennya.</p>
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            href="/admin/naik-kelas"
+            className="flex items-center gap-2 bg-white border border-primary-100 hover:bg-surface text-ink text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
+          >
+            <ArrowUpCircle size={16} />
+            Naik Kelas
+          </Link>
           <button
             onClick={() => setShowImportModal(true)}
             className="flex items-center gap-2 bg-white border border-primary-100 hover:bg-surface text-ink text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"

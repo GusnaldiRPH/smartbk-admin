@@ -263,3 +263,90 @@ export async function fetchResultCountsByAssessment() {
 
   return Array.from(counts.values()).sort((a, b) => b.count - a.count);
 }
+// ---------------------------------------------------------------------
+// Naik kelas
+// ---------------------------------------------------------------------
+
+export type TahunAjaran = { id: string; nama: string; is_active: boolean };
+
+export async function fetchTahunAjaranList(): Promise<TahunAjaran[]> {
+  const { data, error } = await supabase.from("tahun_ajaran").select("*").order("nama", { ascending: false });
+  if (error) throw error;
+  return data as TahunAjaran[];
+}
+
+export async function createTahunAjaran(nama: string): Promise<TahunAjaran> {
+  const { data, error } = await supabase
+    .from("tahun_ajaran").insert({ nama, is_active: false }).select().single();
+  if (error) throw error;
+  return data as TahunAjaran;
+}
+
+export async function activateTahunAjaran(id: string) {
+  const { error } = await supabase.rpc("aktifkan_tahun_ajaran", { p_id: id });
+  if (error) throw error;
+}
+
+export type RosterItem = {
+  siswa_id: string;
+  user_id: string;
+  nis: string;
+  nama: string;
+  riwayat_kelas_id: string;
+  tingkat: number;
+  kelas_nama: string;
+};
+
+/** Semua siswa yang aktif di tahun ajaran yang sedang aktif, siap dipindahkan. */
+export async function fetchRosterAktif(): Promise<RosterItem[]> {
+  const { data, error } = await supabase
+    .from("kelas_siswa_aktif")
+    .select("siswa_id, riwayat_kelas_id, tingkat, kelas_nama, siswa:siswa_id(nis, nama, user_id)");
+  if (error) throw error;
+  return (data as any[]).map((r) => ({
+    siswa_id: r.siswa_id,
+    riwayat_kelas_id: r.riwayat_kelas_id,
+    tingkat: r.tingkat,
+    kelas_nama: r.kelas_nama,
+    user_id: r.siswa.user_id,
+    nis: r.siswa.nis,
+    nama: r.siswa.nama,
+  }));
+}
+
+/** Pindahkan 1 siswa ke kelas baru di tahun ajaran baru (naik kelas / tinggal kelas). */
+export async function promoteStudent(params: {
+  siswaId: string;
+  userId: string;
+  oldRiwayatId: string;
+  newTahunAjaranId: string;
+  newKelasId: string;
+  newKelasNama: string;
+  hasil: "naik" | "tinggal_kelas";
+}) {
+  const { error: e1 } = await supabase
+    .from("riwayat_kelas").update({ hasil: params.hasil, tanggal_selesai: new Date().toISOString().slice(0, 10) })
+    .eq("id", params.oldRiwayatId);
+  if (e1) throw e1;
+
+  const { error: e2 } = await supabase
+    .from("riwayat_kelas")
+    .upsert(
+      { siswa_id: params.siswaId, kelas_id: params.newKelasId, tahun_ajaran_id: params.newTahunAjaranId },
+      { onConflict: "siswa_id,tahun_ajaran_id" }
+    );
+  if (e2) throw e2;
+
+  await supabase.from("profiles").update({ class_name: params.newKelasNama }).eq("id", params.userId);
+}
+
+/** Tandai siswa lulus (dipakai untuk kelas 12 yang tidak ada di file kenaikan kelas). */
+export async function markSiswaLulus(siswaId: string, oldRiwayatId: string) {
+  const { error: e1 } = await supabase
+    .from("riwayat_kelas").update({ hasil: "lulus", tanggal_selesai: new Date().toISOString().slice(0, 10) })
+    .eq("id", oldRiwayatId);
+  if (e1) throw e1;
+
+  const { error: e2 } = await supabase.from("siswa").update({ status: "lulus" }).eq("id", siswaId);
+  if (e2) throw e2;
+}
