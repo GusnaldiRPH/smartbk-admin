@@ -14,6 +14,7 @@ import {
   ArrowUpDown,
   ChevronLeft,
   ChevronRight,
+  ListOrdered,
 } from "lucide-react";
 import {
   fetchAssessmentsForAdmin,
@@ -25,6 +26,7 @@ import { Assessment, Dimension, Question, QuestionOption } from "@/types";
 import ImportQuestionsModal from "@/components/ImportQuestionsModal";
 import ImportDiscQuestionsModal from "@/components/ImportDiscQuestionsModal";
 import ImportRmibQuestionsModal from "@/components/ImportRmibQuestionsModal";
+import ReorderQuestionsModal from "@/components/ReorderQuestionsModal";
 
 const OPTIONS_BY_TYPE: Record<string, QuestionOption[]> = {
   study_plan: [
@@ -59,6 +61,7 @@ export default function ManageQuestionsPage() {
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [showReorderModal, setShowReorderModal] = useState(false);
 
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("order");
@@ -143,6 +146,11 @@ export default function ManageQuestionsPage() {
   const safePage = Math.min(page, totalPages);
   const pageItems = sorted.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
+  const orderedForReorder = useMemo(
+    () => [...questions].sort((a, b) => a.question_order - b.question_order),
+    [questions]
+  );
+
   const SortIcon = ({ column }: { column: SortKey }) => {
     if (sortKey !== column) return <ArrowUpDown size={13} className="text-muted/50" />;
     return sortDir === "asc" ? (
@@ -161,6 +169,15 @@ export default function ManageQuestionsPage() {
         </div>
         {assessmentId && (
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowReorderModal(true)}
+              disabled={questions.length < 2}
+              className="flex items-center gap-2 bg-white border border-primary-100 hover:bg-surface disabled:opacity-40 text-ink text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
+              title={questions.length < 2 ? "Minimal 2 soal untuk diatur urutannya" : ""}
+            >
+              <ListOrdered size={16} />
+              Atur Urutan
+            </button>
             <button
               onClick={() => setShowImportModal(true)}
               className="flex items-center gap-2 bg-white border border-primary-100 hover:bg-surface text-ink text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
@@ -312,6 +329,14 @@ export default function ManageQuestionsPage() {
           </>
         )}
       </div>
+
+      {showReorderModal && (
+        <ReorderQuestionsModal
+          questions={orderedForReorder}
+          onClose={() => setShowReorderModal(false)}
+          onSaved={reloadQuestions}
+        />
+      )}
 
       {showImportModal && selectedAssessment && isDefaultImportable && (
         <ImportQuestionsModal

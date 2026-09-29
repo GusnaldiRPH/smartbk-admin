@@ -8,6 +8,7 @@ import {
   updateQuestion,
   fetchDimensionsForAssessment,
   fetchAssessmentsForAdmin,
+  fetchAllQuestions,
 } from "@/lib/assessmentService";
 import { Assessment, Dimension, Question, QuestionOption } from "@/types";
 
@@ -54,6 +55,13 @@ export default function QuestionForm({ editing, defaultAssessmentId }: Props) {
     editing?.scoring_rules?.dimension_code ?? ""
   );
 
+  // --- urutan soal: dulu selalu ke-set 0 untuk tipe default & DISC karena
+  // tidak ada input-nya. Sekarang admin bisa atur manual di sini. ---
+  const [questionOrder, setQuestionOrder] = useState<string>(
+    editing?.question_order != null ? String(editing.question_order) : ""
+  );
+  const [existingQuestionCount, setExistingQuestionCount] = useState(0);
+
   // --- state khusus DISC ---
   const [discOptionTexts, setDiscOptionTexts] = useState<string[]>(
     editing?.options?.length === 4 ? editing.options.map((o) => o.label) : ["", "", "", ""]
@@ -83,9 +91,25 @@ export default function QuestionForm({ editing, defaultAssessmentId }: Props) {
       return;
     }
     setLoadingMeta(true);
-    fetchDimensionsForAssessment(assessmentId)
-      .then((dims) => {
+    Promise.all([
+      fetchDimensionsForAssessment(assessmentId),
+      fetchAllQuestions(assessmentId),
+    ])
+      .then(([dims, existingQuestions]) => {
         setDimensions(dims);
+        setExistingQuestionCount(existingQuestions.length);
+
+        // Saran urutan otomatis untuk soal BARU (bukan sedang edit):
+        // lanjut dari nomor urut tertinggi yang sudah ada, supaya nggak
+        // ke-0 lagi seperti bug lama.
+        if (!editing && !questionOrder) {
+          const maxOrder = existingQuestions.reduce(
+            (max, q) => Math.max(max, q.question_order),
+            0
+          );
+          setQuestionOrder(String(maxOrder + 1));
+        }
+
         if (
           assessmentId === (defaultAssessmentId ?? editing?.assessment_id) &&
           editing?.options?.length === dims.length
@@ -97,9 +121,10 @@ export default function QuestionForm({ editing, defaultAssessmentId }: Props) {
           setRmibJobLabels((prev) => (prev.length === dims.length ? prev : dims.map(() => "")));
         }
       })
-      .catch((err) => alert(err.message ?? "Gagal memuat dimensi."))
+      .catch((err) => alert(err.message ?? "Gagal memuat data pendukung."))
       .finally(() => setLoadingMeta(false));
-  }, [assessmentId]); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assessmentId]);
 
   const selectedAssessment = useMemo(
     () => assessments.find((a) => a.id === assessmentId),
@@ -139,8 +164,13 @@ export default function QuestionForm({ editing, defaultAssessmentId }: Props) {
         alert("Pilih dimensi untuk setiap opsi jawaban.");
         return;
       }
+      if (!questionOrder.trim() || Number.isNaN(Number(questionOrder))) {
+        alert("Isi Urutan soal dengan angka yang valid.");
+        return;
+      }
       finalOptions = discOptionTexts.map((text, idx) => ({ label: text, value: idx + 1 }));
       scoring_rules = { option_dimensions: discOptionDimensions };
+      finalQuestionOrder = Number(questionOrder);
     } else if (isRmib) {
       if (!rmibGroupOrder.trim()) {
         alert("Isi nomor kelompok (1-12).");
@@ -171,8 +201,13 @@ export default function QuestionForm({ editing, defaultAssessmentId }: Props) {
         alert("Pilih dimensi untuk soal ini.");
         return;
       }
+      if (!questionOrder.trim() || Number.isNaN(Number(questionOrder))) {
+        alert("Isi Urutan soal dengan angka yang valid.");
+        return;
+      }
       finalOptions = options;
       scoring_rules = { dimension_code: dimensionCode };
+      finalQuestionOrder = Number(questionOrder);
     }
 
     try {
@@ -180,7 +215,7 @@ export default function QuestionForm({ editing, defaultAssessmentId }: Props) {
       if (editing) {
         await updateQuestion(editing.id, {
           question_text: finalQuestionText,
-          question_order: isRmib ? finalQuestionOrder : editing.question_order,
+          question_order: finalQuestionOrder,
           options: finalOptions,
           scoring_rules,
         });
@@ -228,6 +263,23 @@ export default function QuestionForm({ editing, defaultAssessmentId }: Props) {
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 mb-4 text-sm text-amber-800">
           Tipe asesmen &quot;{assessmentType}&quot; belum memiliki opsi jawaban standar di form
           ini.
+        </div>
+      )}
+
+      {/* Urutan — ditampilkan untuk tipe default & DISC (RMIB pakai "Nomor Kelompok" sendiri). */}
+      {selectedAssessment && isSupportedType && !isRmib && (
+        <div className="mb-5">
+          <label className="text-sm font-semibold text-ink mb-1.5 block">Urutan</label>
+          <input
+            type="number"
+            value={questionOrder}
+            onChange={(e) => setQuestionOrder(e.target.value)}
+            placeholder={`Saran: ${existingQuestionCount + 1}`}
+            className="w-32 bg-white border border-primary-100 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-primary-700"
+          />
+          <p className="text-muted text-xs mt-1">
+            Menentukan urutan tampil soal ini saat siswa mengerjakan asesmen.
+          </p>
         </div>
       )}
 
