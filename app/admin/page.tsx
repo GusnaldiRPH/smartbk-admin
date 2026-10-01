@@ -9,13 +9,14 @@ import {
   ClipboardCheck,
   CalendarDays,
   UserX,
-  HeartPulse,
   School,
   Activity,
   CheckCircle2,
   ChevronRight,
+  PieChartIcon,
   type LucideIcon,
 } from "lucide-react";
+import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import {
   fetchDashboardStats,
   fetchResultCountsByAssessment,
@@ -23,7 +24,6 @@ import {
   fetchAllStudents,
   fetchAssessmentsForAdmin,
 } from "@/lib/assessmentService";
-import ResultsByAssessmentChart from "@/components/ResultsByAssessmentChart";
 import { Avatar, EmptyState } from "@/components/ui";
 
 interface Stats {
@@ -40,8 +40,9 @@ const STAT_CARDS = [
   { key: "totalResults", label: "Hasil Terkumpul", icon: FileBarChart, from: "#34d399", to: "#047857" },
 ] as const;
 
+const CHART_COLORS = ["#0a7d4e", "#14b8a6", "#84cc16", "#047857", "#f59e0b", "#0d9488", "#65a30d"];
+
 const BELUM_LIMIT = 6;
-const PERHATIAN_LIMIT = 6;
 const TERBARU_LIMIT = 8;
 
 /* ---------- helpers ---------- */
@@ -184,7 +185,7 @@ export default function DashboardPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  const { belumMengisi, belumMulai, perhatian, kelasProgress, terbaru } = useMemo(() => {
+  const { belumMengisi, belumMulai, kelasProgress, terbaru } = useMemo(() => {
     const totalA = assessments.length;
 
     // siswa -> set asesmen yang sudah dikerjakan
@@ -207,21 +208,7 @@ export default function DashboardPage() {
             );
     const belumMulai = belumMengisi.filter((x) => x.n === 0).length;
 
-    // 2) Perlu perhatian: hasil TERBARU skala stres tiap siswa berkategori "tinggi"
-    const latestStress = new Map<string, any>();
-    results
-      .filter((r) => r.assessments?.assessment_type === "stress_scale")
-      .sort(byDateDesc)
-      .forEach((r) => {
-        if (!latestStress.has(r.student_id)) latestStress.set(r.student_id, r);
-      });
-    const perhatian = Array.from(latestStress.values())
-      .filter((r) => /tinggi/i.test(r.category ?? ""))
-      .sort(
-        (a, b) => (b.total_score ?? 0) / (b.max_score || 1) - (a.total_score ?? 0) / (a.max_score || 1)
-      );
-
-    // 3) Progres pengisian per kelas (rata-rata kelengkapan asesmen)
+    // 2) Progres pengisian per kelas (rata-rata kelengkapan asesmen)
     const byClass = new Map<string, { students: number; pairs: number }>();
     students.forEach((s) => {
       if (!s.class_name) return;
@@ -236,13 +223,14 @@ export default function DashboardPage() {
       pct: totalA ? Math.min(100, Math.round((c.pairs / (c.students * totalA)) * 100)) : 0,
     })).sort((a, b) => a.pct - b.pct || a.name.localeCompare(b.name, "id"));
 
-    // 4) Aktivitas terbaru
+    // 3) Aktivitas terbaru
     const terbaru = [...results].sort(byDateDesc).slice(0, TERBARU_LIMIT);
 
-    return { belumMengisi, belumMulai, perhatian, kelasProgress, terbaru };
+    return { belumMengisi, belumMulai, kelasProgress, terbaru };
   }, [students, results, assessments]);
 
   const totalA = assessments.length;
+  const donutTotal = chartData.reduce((sum, d) => sum + d.count, 0);
 
   const today = new Date().toLocaleDateString("id-ID", {
     weekday: "long",
@@ -278,7 +266,7 @@ export default function DashboardPage() {
             <div className={`${skeleton} h-80`} />
             <div className={`${skeleton} h-80`} />
           </div>
-          <div className="grid lg:grid-cols-2 gap-5 mb-5">
+          <div className="grid lg:grid-cols-2 gap-5">
             <div className={`${skeleton} h-80`} />
             <div className={`${skeleton} h-80`} />
           </div>
@@ -292,7 +280,7 @@ export default function DashboardPage() {
             ))}
           </div>
 
-          {/* Baris 1: belum mengisi + perlu perhatian */}
+          {/* Baris 1: belum mengisi + diagram lingkaran aktivitas asesmen */}
           <div className="grid lg:grid-cols-2 gap-5 mb-5">
             <Panel
               icon={UserX}
@@ -361,72 +349,78 @@ export default function DashboardPage() {
             </Panel>
 
             <Panel
-              icon={HeartPulse}
-              title="Perlu Perhatian"
-              subtitle="Hasil terbaru Skala Stres Akademik berkategori tinggi"
+              icon={PieChartIcon}
+              title="Aktivitas Asesmen"
+              subtitle="Proporsi hasil yang terkumpul per jenis asesmen"
               delay={380}
-              badge={
-                perhatian.length > 0 && (
-                  <span className="bg-red-100 text-red-700 text-xs font-bold px-2.5 py-1 rounded-full tabular-nums">
-                    {perhatian.length}
-                  </span>
-                )
-              }
             >
-              {perhatian.length === 0 ? (
-                <EmptyState
-                  icon={CheckCircle2}
-                  text="Belum ada siswa dengan tingkat stres akademik tinggi."
-                />
+              {donutTotal === 0 ? (
+                <EmptyState icon={PieChartIcon} text="Belum ada hasil asesmen yang terkumpul." />
               ) : (
-                <>
-                  <div>
-                    {perhatian.slice(0, PERHATIAN_LIMIT).map((r, i) => (
-                      <Link
-                        key={r.id}
-                        href={`/admin/students/${r.student_id}`}
-                        className={rowCls}
-                        style={{ animationDelay: `${440 + i * 45}ms` }}
-                      >
-                        <Avatar name={r.profiles?.full_name} size={34} />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold text-ink truncate">
-                            {r.profiles?.full_name ?? "-"}
-                          </p>
-                          <p className="text-xs text-muted">
-                            {r.profiles?.class_name ?? "Tanpa kelas"} • {timeAgo(r.created_at)}
-                          </p>
-                        </div>
-                        <div className="text-right shrink-0">
-                          <span className="inline-block bg-red-50 text-red-700 text-xs font-semibold px-2.5 py-1 rounded-full">
-                            {r.category}
-                          </span>
-                          <p className="text-[11px] text-muted mt-1 tabular-nums">
-                            {r.total_score}/{r.max_score ?? "-"}
-                          </p>
-                        </div>
-                        <ChevronRight
-                          size={15}
-                          className="text-muted/50 transition-transform group-hover:translate-x-0.5 group-hover:text-primary-600"
+                <div className="p-5 flex flex-col gap-4">
+                  <div className="relative h-[220px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={chartData}
+                          dataKey="count"
+                          nameKey="title"
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={62}
+                          outerRadius={96}
+                          paddingAngle={3}
+                          cornerRadius={5}
+                          stroke="none"
+                          animationDuration={900}
+                        >
+                          {chartData.map((_, idx) => (
+                            <Cell key={idx} fill={CHART_COLORS[idx % CHART_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          formatter={(value: number, name: string) => [`${value} hasil`, name]}
+                          contentStyle={{
+                            borderRadius: 12,
+                            border: "1px solid #b3f0cf",
+                            fontSize: 13,
+                            boxShadow: "0 10px 30px -10px rgba(5,46,31,0.25)",
+                          }}
                         />
-                      </Link>
+                      </PieChart>
+                    </ResponsiveContainer>
+                    {/* angka di tengah donat */}
+                    <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                      <span className="text-3xl font-extrabold text-ink tabular-nums leading-none">
+                        {donutTotal}
+                      </span>
+                      <span className="text-xs text-muted mt-1">total hasil</span>
+                    </div>
+                  </div>
+
+                  {/* legenda */}
+                  <div className="flex flex-col gap-2">
+                    {chartData.map((d, idx) => (
+                      <div key={d.title} className="flex items-center gap-2.5 text-sm">
+                        <span
+                          className="w-3 h-3 rounded-full shrink-0"
+                          style={{ backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }}
+                        />
+                        <span className="flex-1 min-w-0 truncate text-ink">{d.title}</span>
+                        <span className="text-xs text-muted tabular-nums shrink-0">
+                          {d.count} •{" "}
+                          <b className="text-ink">{Math.round((d.count / donutTotal) * 100)}%</b>
+                        </span>
+                      </div>
                     ))}
                   </div>
-                  {perhatian.length > PERHATIAN_LIMIT && (
-                    <Link
-                      href="/admin/results"
-                      className="mt-auto px-5 py-3 text-xs font-semibold text-primary-700 hover:bg-primary-50 border-t border-primary-50 transition-colors"
-                    >
-                      +{perhatian.length - PERHATIAN_LIMIT} siswa lainnya • Buka Hasil Asesmen
-                    </Link>
-                  )}
-                </>
+                </div>
               )}
             </Panel>
           </div>
 
           {/* Baris 2: progres per kelas + aktivitas terbaru */}
-          <div className="grid lg:grid-cols-2 gap-5 mb-5">
+          <div className="grid lg:grid-cols-2 gap-5">
             <Panel
               icon={School}
               title="Progres Pengisian per Kelas"
@@ -501,23 +495,6 @@ export default function DashboardPage() {
                 </div>
               )}
             </Panel>
-          </div>
-
-          {/* Grafik per asesmen (tetap) */}
-          <div
-            className="bg-white border border-primary-100 rounded-2xl overflow-hidden animate-fadeUp"
-            style={{ animationDelay: "620ms" }}
-          >
-            <div className="px-5 py-4 border-b border-primary-50 flex items-center gap-3">
-              <span className="w-1.5 h-9 rounded-full bg-gradient-to-b from-primary-400 to-primary-700" />
-              <div>
-                <h2 className="font-bold text-ink">Aktivitas Asesmen</h2>
-                <p className="text-muted text-xs mt-0.5">Jumlah hasil yang terkumpul per jenis asesmen.</p>
-              </div>
-            </div>
-            <div className="px-4 pt-4 pb-2">
-              <ResultsByAssessmentChart data={chartData} />
-            </div>
           </div>
         </>
       )}
