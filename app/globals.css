@@ -1,8 +1,125 @@
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-body {
-  background-color: #f4f8f6;
-  color: #111827;
+@layer base {
+  html { scroll-behavior: smooth; }
+  body { @apply bg-surface text-ink antialiased; }
+  ::selection { background: #7de3b0; color: #032d1e; }
+  ::-webkit-scrollbar { width: 12px; height: 12px; }
+  ::-webkit-scrollbar-thumb {
+    background: #b3f0cf; border-radius: 999px;
+    border: 3px solid transparent; background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: #3ccf8a; background-clip: content-box; border: 3px solid transparent; }
 }
+
+/* ===== Gaya otomatis untuk SEMUA halaman di /admin ===== */
+
+/* Kartu */
+.admin-main .bg-white.rounded-2xl {
+  border-color: rgba(10, 125, 78, 0.1);
+  box-shadow: 0 1px 2px rgba(5, 46, 31, 0.04), 0 10px 30px -14px rgba(5, 46, 31, 0.12);
+  transition: box-shadow 0.3s ease, border-color 0.3s ease;
+}
+.admin-main .bg-white.rounded-2xl:hover {
+  border-color: rgba(23, 181, 116, 0.3);
+  box-shadow: 0 1px 2px rgba(5, 46, 31, 0.04), 0 18px 40px -16px rgba(10, 125, 78, 0.22);
+}
+
+/* Tombol utama */
+.admin-main button.bg-primary-700,
+.admin-main a.bg-primary-700 {
+  background-image: linear-gradient(135deg, #17b574, #0a7d4e);
+  box-shadow: 0 10px 22px -10px rgba(10, 125, 78, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+.admin-main button.bg-primary-700:hover:not(:disabled),
+.admin-main a.bg-primary-700:hover {
+  transform: translateY(-2px);
+  filter: brightness(1.06);
+  box-shadow: 0 16px 28px -10px rgba(10, 125, 78, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+.admin-main button.bg-primary-700:active:not(:disabled),
+.admin-main a.bg-primary-700:active { transform: translateY(0) scale(0.97); }
+.admin-main button.bg-primary-700:disabled { box-shadow: none; }
+
+/* Tombol sekunder (putih) */
+.admin-main button.bg-white,
+.admin-main a.bg-white {
+  transition: transform 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+.admin-main button.bg-white:hover:not(:disabled),
+.admin-main a.bg-white:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px -10px rgba(10, 125, 78, 0.35);
+}
+
+/* Input */
+.admin-main input,
+.admin-main select,
+.admin-main textarea { transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease; }
+.admin-main input:focus,
+.admin-main select:focus,
+.admin-main textarea:focus {
+  border-color: #17b574;
+  box-shadow: 0 0 0 4px rgba(23, 181, 116, 0.15);
+}
+
+/* Tabel */
+.admin-main thead th {
+  text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.68rem; font-weight: 700;
+}
+.admin-main thead tr { background: rgba(239, 253, 245, 0.7); }
+.admin-main tbody tr { transition: background-color 0.2s ease; }
+.admin-main tbody tr:hover { background: rgba(239, 253, 245, 0.95); }
+
+/* ===== Popup / modal: selalu fixed di tengah layar ===== */
+@keyframes overlayIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes modalIn {
+  from { opacity: 0; transform: scale(0.96) translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+
+.admin-main .fixed.inset-0 {
+  position: fixed;
+  inset: 0;
+  z-index: 100; /* di atas sidebar & top bar */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  background-color: rgba(3, 45, 30, 0.45);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  animation: overlayIn 0.2s ease backwards;
+}
+
+/* kartu popup: kalau terlalu tinggi, scroll di dalam kartu, bukan geser halaman */
+.admin-main .fixed.inset-0 > div {
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  animation: modalIn 0.3s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+/* halaman di belakang dikunci selama popup terbuka */
+body:has(.admin-main .fixed.inset-0) { overflow: hidden; }
+html { scrollbar-gutter: stable; } /* biar layout nggak geser saat scrollbar hilang */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* Animasi masuk halaman: HANYA opacity.
+   Jangan pakai transform/translate di sini, karena itu bikin popup
+   fixed "terjebak" di dalam wrapper dan nggak center di layar. */
+@keyframes pageEnter {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.page-enter { animation: pageEnter 0.35s ease backwards; }

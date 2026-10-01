@@ -1,17 +1,24 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
+import { PlusCircle } from "lucide-react";
 import QuestionForm from "@/components/QuestionForm";
+import { PageHeader } from "@/components/ui";
 
 export default function NewQuestionPage() {
   const searchParams = useSearchParams();
   const assessmentId = searchParams.get("assessmentId") ?? undefined;
 
   return (
-    <div className="p-8">
-      <h1 className="text-2xl font-bold text-ink mb-1">Tambah Soal Baru</h1>
-      <p className="text-muted text-sm mb-6">Isi detail soal di bawah ini.</p>
-      <QuestionForm defaultAssessmentId={assessmentId} />
+    <div className="p-4 sm:p-8">
+      <PageHeader
+        icon={PlusCircle}
+        title="Tambah Soal Baru"
+        subtitle="Isi detail soal di bawah ini."
+      />
+      <div className="animate-fadeUp" style={{ animationDelay: "100ms" }}>
+        <QuestionForm defaultAssessmentId={assessmentId} />
+      </div>
     </div>
   );
 }

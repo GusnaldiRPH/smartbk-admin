@@ -9,12 +9,8 @@ import {
   Loader2,
   Upload,
   Search,
-  ArrowUp,
-  ArrowDown,
-  ArrowUpDown,
-  ChevronLeft,
-  ChevronRight,
   ListOrdered,
+  ListChecks,
 } from "lucide-react";
 import {
   fetchAssessmentsForAdmin,
@@ -27,6 +23,15 @@ import ImportQuestionsModal from "@/components/ImportQuestionsModal";
 import ImportDiscQuestionsModal from "@/components/ImportDiscQuestionsModal";
 import ImportRmibQuestionsModal from "@/components/ImportRmibQuestionsModal";
 import ReorderQuestionsModal from "@/components/ReorderQuestionsModal";
+import {
+  EmptyState,
+  PageHeader,
+  Pagination,
+  SortTh,
+  TableSkeleton,
+  controlCls,
+  labelCls,
+} from "@/components/ui";
 
 const OPTIONS_BY_TYPE: Record<string, QuestionOption[]> = {
   study_plan: [
@@ -151,58 +156,58 @@ export default function ManageQuestionsPage() {
     [questions]
   );
 
-  const SortIcon = ({ column }: { column: SortKey }) => {
-    if (sortKey !== column) return <ArrowUpDown size={13} className="text-muted/50" />;
-    return sortDir === "asc" ? (
-      <ArrowUp size={13} className="text-primary-700" />
-    ) : (
-      <ArrowDown size={13} className="text-primary-700" />
-    );
-  };
+  const sortProps = (key: SortKey) => ({
+    active: sortKey === key,
+    dir: sortDir,
+    onClick: () => handleSort(key),
+  });
 
   return (
-    <div className="p-8 max-w-5xl">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-ink mb-1">Kelola Soal</h1>
-          <p className="text-muted text-sm">Tambah, edit, atau hapus soal per asesmen.</p>
-        </div>
-        {assessmentId && (
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowReorderModal(true)}
-              disabled={questions.length < 2}
-              className="flex items-center gap-2 bg-white border border-primary-100 hover:bg-surface disabled:opacity-40 text-ink text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
-              title={questions.length < 2 ? "Minimal 2 soal untuk diatur urutannya" : ""}
-            >
-              <ListOrdered size={16} />
-              Atur Urutan
-            </button>
-            <button
-              onClick={() => setShowImportModal(true)}
-              className="flex items-center gap-2 bg-white border border-primary-100 hover:bg-surface text-ink text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
-            >
-              <Upload size={16} />
-              Import dari Excel
-            </button>
-            <Link
-              href={`/admin/questions/new?assessmentId=${assessmentId}`}
-              className="flex items-center gap-2 bg-primary-700 hover:bg-primary-800 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
-            >
-              <Plus size={16} />
-              Tambah Soal
-            </Link>
-          </div>
-        )}
-      </div>
+    <div className="p-4 sm:p-8 max-w-5xl">
+      <PageHeader
+        icon={ListChecks}
+        title="Kelola Soal"
+        subtitle={
+          loading ? "Memuat soal..." : `${questions.length} soal pada asesmen terpilih • tambah, edit, atau hapus`
+        }
+        actions={
+          assessmentId && (
+            <>
+              <button
+                onClick={() => setShowReorderModal(true)}
+                disabled={questions.length < 2}
+                className="flex items-center gap-2 bg-white border border-primary-100 hover:bg-surface disabled:opacity-40 text-ink text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
+                title={questions.length < 2 ? "Minimal 2 soal untuk diatur urutannya" : ""}
+              >
+                <ListOrdered size={16} />
+                Atur Urutan
+              </button>
+              <button
+                onClick={() => setShowImportModal(true)}
+                className="flex items-center gap-2 bg-white border border-primary-100 hover:bg-surface text-ink text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
+              >
+                <Upload size={16} />
+                Import dari Excel
+              </button>
+              <Link
+                href={`/admin/questions/new?assessmentId=${assessmentId}`}
+                className="flex items-center gap-2 bg-primary-700 hover:bg-primary-800 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
+              >
+                <Plus size={16} />
+                Tambah Soal
+              </Link>
+            </>
+          )
+        }
+      />
 
-      <div className="flex flex-wrap gap-3 mb-5">
+      <div className="flex flex-wrap gap-3 mb-5 animate-fadeUp" style={{ animationDelay: "80ms" }}>
         <div>
-          <label className="text-sm font-semibold text-ink mb-1.5 block">Asesmen</label>
+          <label className={labelCls}>Asesmen</label>
           <select
             value={assessmentId}
             onChange={(e) => setAssessmentId(e.target.value)}
-            className="bg-white border border-primary-100 rounded-xl px-3.5 py-2.5 text-sm min-w-[280px] outline-none focus:border-primary-700"
+            className={`${controlCls} min-w-[280px]`}
           >
             {assessments.map((a) => (
               <option key={a.id} value={a.id}>
@@ -213,7 +218,7 @@ export default function ManageQuestionsPage() {
         </div>
 
         <div className="flex-1 min-w-[200px]">
-          <label className="text-sm font-semibold text-ink mb-1.5 block">Cari Soal</label>
+          <label className={labelCls}>Cari Soal</label>
           <div className="relative">
             <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" />
             <input
@@ -224,108 +229,85 @@ export default function ManageQuestionsPage() {
                 setPage(1);
               }}
               placeholder="Cari teks soal atau nomor urut..."
-              className="w-full bg-white border border-primary-100 rounded-xl pl-9 pr-3.5 py-2.5 text-sm outline-none focus:border-primary-700"
+              className={`${controlCls} pl-10`}
             />
           </div>
         </div>
       </div>
 
-      <div className="bg-white border border-primary-100 rounded-2xl overflow-hidden">
+      <div className="bg-white border border-primary-100 rounded-2xl overflow-hidden animate-fadeUp" style={{ animationDelay: "140ms" }}>
         {loading ? (
-          <div className="px-5 py-8 flex justify-center">
-            <Loader2 className="animate-spin text-primary-700" size={22} />
-          </div>
+          <TableSkeleton />
         ) : sorted.length === 0 ? (
-          <p className="text-muted text-sm px-5 py-8 text-center">
-            {questions.length === 0
-              ? "Belum ada soal untuk asesmen ini."
-              : "Tidak ada soal yang cocok dengan pencarian."}
-          </p>
+          <EmptyState
+            icon={ListChecks}
+            text={
+              questions.length === 0
+                ? "Belum ada soal untuk asesmen ini."
+                : "Tidak ada soal yang cocok dengan pencarian."
+            }
+          />
         ) : (
           <>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-muted text-xs border-b border-primary-50">
-                  <th className="px-5 py-2.5 font-medium w-20">
-                    <button
-                      onClick={() => handleSort("order")}
-                      className="flex items-center gap-1 hover:text-ink transition-colors"
-                    >
-                      Urutan
-                      <SortIcon column="order" />
-                    </button>
-                  </th>
-                  <th className="px-5 py-2.5 font-medium">
-                    <button
-                      onClick={() => handleSort("text")}
-                      className="flex items-center gap-1 hover:text-ink transition-colors"
-                    >
-                      {isRmib ? "Kelompok" : "Teks Soal"}
-                      <SortIcon column="text" />
-                    </button>
-                  </th>
-                  <th className="px-5 py-2.5 font-medium w-32">Aksi</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pageItems.map((q) => (
-                  <tr key={q.id} className="border-b border-primary-50 last:border-0">
-                    <td className="px-5 py-3 text-muted">{q.question_order}</td>
-                    <td className="px-5 py-3 text-ink">{q.question_text}</td>
-                    <td className="px-5 py-3">
-                      <div className="flex items-center gap-2">
-                        <Link
-                          href={`/admin/questions/${q.id}`}
-                          className="w-8 h-8 rounded-lg bg-primary-50 hover:bg-primary-100 flex items-center justify-center transition-colors"
-                          title="Edit"
-                        >
-                          <Pencil size={14} color="#0e6f4c" />
-                        </Link>
-                        <button
-                          onClick={() => handleDelete(q.id)}
-                          disabled={deletingId === q.id}
-                          className="w-8 h-8 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors disabled:opacity-50"
-                          title="Hapus"
-                        >
-                          {deletingId === q.id ? (
-                            <Loader2 size={14} className="animate-spin text-red-600" />
-                          ) : (
-                            <Trash2 size={14} color="#dc2626" />
-                          )}
-                        </button>
-                      </div>
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-muted text-xs border-b border-primary-50">
+                    <SortTh label="Urutan" className="w-28" {...sortProps("order")} />
+                    <SortTh label={isRmib ? "Kelompok" : "Teks Soal"} {...sortProps("text")} />
+                    <th className="px-5 py-3 w-32">Aksi</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-
-            {/* Pagination */}
-            <div className="flex items-center justify-between px-5 py-3 border-t border-primary-50 text-xs text-muted">
-              <span>
-                Menampilkan {(safePage - 1) * PAGE_SIZE + 1}-
-                {Math.min(safePage * PAGE_SIZE, sorted.length)} dari {sorted.length} soal
-              </span>
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={safePage === 1}
-                  className="w-7 h-7 rounded-lg border border-primary-100 flex items-center justify-center disabled:opacity-40 hover:bg-surface transition-colors"
-                >
-                  <ChevronLeft size={14} />
-                </button>
-                <span className="px-2 font-medium text-ink">
-                  {safePage} / {totalPages}
-                </span>
-                <button
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={safePage === totalPages}
-                  className="w-7 h-7 rounded-lg border border-primary-100 flex items-center justify-center disabled:opacity-40 hover:bg-surface transition-colors"
-                >
-                  <ChevronRight size={14} />
-                </button>
-              </div>
+                </thead>
+                <tbody>
+                  {pageItems.map((q, i) => (
+                    <tr
+                      key={q.id}
+                      className="border-b border-primary-50 last:border-0 animate-fadeUp"
+                      style={{ animationDelay: `${i * 35}ms` }}
+                    >
+                      <td className="px-5 py-3">
+                        <span className="w-8 h-8 rounded-lg bg-primary-50 text-primary-700 font-bold text-xs flex items-center justify-center tabular-nums">
+                          {q.question_order}
+                        </span>
+                      </td>
+                      <td className="px-5 py-3 text-ink leading-relaxed">{q.question_text}</td>
+                      <td className="px-5 py-3">
+                        <div className="flex items-center gap-2">
+                          <Link
+                            href={`/admin/questions/${q.id}`}
+                            className="w-8 h-8 rounded-lg bg-primary-50 hover:bg-primary-100 flex items-center justify-center transition-colors"
+                            title="Edit"
+                          >
+                            <Pencil size={14} color="#0a7d4e" />
+                          </Link>
+                          <button
+                            onClick={() => handleDelete(q.id)}
+                            disabled={deletingId === q.id}
+                            className="w-8 h-8 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors disabled:opacity-50"
+                            title="Hapus"
+                          >
+                            {deletingId === q.id ? (
+                              <Loader2 size={14} className="animate-spin text-red-600" />
+                            ) : (
+                              <Trash2 size={14} color="#dc2626" />
+                            )}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
+
+            <Pagination
+              page={safePage}
+              totalPages={totalPages}
+              total={sorted.length}
+              pageSize={PAGE_SIZE}
+              noun="soal"
+              onChange={setPage}
+            />
           </>
         )}
       </div>
@@ -372,7 +354,7 @@ export default function ManageQuestionsPage() {
 
       {showImportModal && selectedAssessment && !isDefaultImportable && !isDisc && !isRmib && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 px-4">
-          <div className="bg-white rounded-2xl w-full max-w-sm p-6 text-center">
+          <div className="bg-white rounded-2xl w-full max-w-sm p-6 text-center animate-popIn">
             <p className="text-sm text-ink mb-4">
               Import Excel belum tersedia untuk tipe asesmen &quot;{assessmentType}&quot;.
             </p>

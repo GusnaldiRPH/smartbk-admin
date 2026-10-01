@@ -9,15 +9,21 @@ import {
   Search,
   Upload,
   Trash2,
-  ArrowUp,
-  ArrowDown,
-  ArrowUpDown,
-  ChevronLeft,
   ArrowUpCircle,
+  Users,
 } from "lucide-react";
 import { fetchAllStudents } from "@/lib/assessmentService";
 import AddStudentModal from "@/components/AddStudentModal";
 import ImportStudentsModal from "@/components/ImportStudentsModal";
+import {
+  Avatar,
+  EmptyState,
+  PageHeader,
+  Pagination,
+  SortTh,
+  TableSkeleton,
+  controlCls,
+} from "@/components/ui";
 
 type SortKey = "name" | "class" | "nis" | "email";
 type SortDir = "asc" | "desc";
@@ -115,49 +121,51 @@ export default function ManageStudentsPage() {
   const safePage = Math.min(page, totalPages);
   const pageItems = sorted.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
-  const SortIcon = ({ column }: { column: SortKey }) => {
-    if (sortKey !== column) return <ArrowUpDown size={13} className="text-muted/50" />;
-    return sortDir === "asc" ? (
-      <ArrowUp size={13} className="text-primary-700" />
-    ) : (
-      <ArrowDown size={13} className="text-primary-700" />
-    );
-  };
+  const sortProps = (key: SortKey) => ({
+    active: sortKey === key,
+    dir: sortDir,
+    onClick: () => handleSort(key),
+  });
 
   return (
-    <div className="p-8 max-w-4xl">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-ink mb-1">Kelola Siswa</h1>
-          <p className="text-muted text-sm">Lihat data siswa dan riwayat hasil asesmennya.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link
-            href="/admin/naik-kelas"
-            className="flex items-center gap-2 bg-white border border-primary-100 hover:bg-surface text-ink text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
-          >
-            <ArrowUpCircle size={16} />
-            Naik Kelas
-          </Link>
-          <button
-            onClick={() => setShowImportModal(true)}
-            className="flex items-center gap-2 bg-white border border-primary-100 hover:bg-surface text-ink text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
-          >
-            <Upload size={16} />
-            Import dari Excel
-          </button>
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 bg-primary-700 hover:bg-primary-800 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
-          >
-            <Plus size={16} />
-            Tambah Siswa
-          </button>
-        </div>
-      </div>
+    <div className="p-4 sm:p-8 max-w-5xl">
+      <PageHeader
+        icon={Users}
+        title="Kelola Siswa"
+        subtitle={
+          loading
+            ? "Memuat data siswa..."
+            : `${students.length} siswa terdaftar • lihat data dan riwayat hasil asesmennya`
+        }
+        actions={
+          <>
+            <Link
+              href="/admin/naik-kelas"
+              className="flex items-center gap-2 bg-white border border-primary-100 hover:bg-surface text-ink text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
+            >
+              <ArrowUpCircle size={16} />
+              Naik Kelas
+            </Link>
+            <button
+              onClick={() => setShowImportModal(true)}
+              className="flex items-center gap-2 bg-white border border-primary-100 hover:bg-surface text-ink text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
+            >
+              <Upload size={16} />
+              Import dari Excel
+            </button>
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="flex items-center gap-2 bg-primary-700 hover:bg-primary-800 text-white text-sm font-semibold px-4 py-2.5 rounded-xl transition-colors"
+            >
+              <Plus size={16} />
+              Tambah Siswa
+            </button>
+          </>
+        }
+      />
 
-      <div className="flex gap-3 mb-5">
-        <div className="relative flex-1">
+      <div className="flex flex-wrap gap-3 mb-5 animate-fadeUp" style={{ animationDelay: "80ms" }}>
+        <div className="relative flex-1 min-w-[220px]">
           <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted" />
           <input
             type="text"
@@ -167,7 +175,7 @@ export default function ManageStudentsPage() {
               setPage(1);
             }}
             placeholder="Cari nama, email, kelas, atau NIS..."
-            className="w-full bg-white border border-primary-100 rounded-xl pl-10 pr-3.5 py-2.5 text-sm outline-none focus:border-primary-700"
+            className={`${controlCls} pl-10`}
           />
         </div>
         <select
@@ -177,7 +185,7 @@ export default function ManageStudentsPage() {
             setPage(1);
           }}
           disabled={classOptions.length === 0}
-          className="bg-white border border-primary-100 rounded-xl px-3.5 py-2.5 text-sm min-w-[160px] outline-none focus:border-primary-700 disabled:bg-surface disabled:text-muted"
+          className={`${controlCls} !w-auto min-w-[170px]`}
         >
           <option value="">Semua Kelas</option>
           {classOptions.map((c) => (
@@ -188,142 +196,110 @@ export default function ManageStudentsPage() {
         </select>
       </div>
 
-      <div className="bg-white border border-primary-100 rounded-2xl overflow-hidden">
+      <div className="bg-white border border-primary-100 rounded-2xl overflow-hidden animate-fadeUp" style={{ animationDelay: "140ms" }}>
         {loading ? (
-          <div className="px-5 py-8 flex justify-center">
-            <Loader2 className="animate-spin text-primary-700" size={22} />
-          </div>
+          <TableSkeleton />
         ) : sorted.length === 0 ? (
-          <p className="text-muted text-sm px-5 py-8 text-center">
-            {students.length === 0
-              ? "Belum ada siswa. Klik \"Tambah Siswa\" untuk menambahkan."
-              : "Tidak ada siswa ditemukan."}
-          </p>
+          <EmptyState
+            icon={Users}
+            text={
+              students.length === 0
+                ? 'Belum ada siswa. Klik "Tambah Siswa" untuk menambahkan.'
+                : "Tidak ada siswa ditemukan."
+            }
+          />
         ) : (
           <>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-muted text-xs border-b border-primary-50">
-                  <th className="px-5 py-2.5 font-medium">
-                    <button
-                      onClick={() => handleSort("name")}
-                      className="flex items-center gap-1 hover:text-ink transition-colors"
-                    >
-                      Nama
-                      <SortIcon column="name" />
-                    </button>
-                  </th>
-                  <th className="px-5 py-2.5 font-medium">
-                    <button
-                      onClick={() => handleSort("class")}
-                      className="flex items-center gap-1 hover:text-ink transition-colors"
-                    >
-                      Kelas
-                      <SortIcon column="class" />
-                    </button>
-                  </th>
-                  <th className="px-5 py-2.5 font-medium">
-                    <button
-                      onClick={() => handleSort("nis")}
-                      className="flex items-center gap-1 hover:text-ink transition-colors"
-                    >
-                      NIS
-                      <SortIcon column="nis" />
-                    </button>
-                  </th>
-                  <th className="px-5 py-2.5 font-medium">
-                    <button
-                      onClick={() => handleSort("email")}
-                      className="flex items-center gap-1 hover:text-ink transition-colors"
-                    >
-                      Email
-                      <SortIcon column="email" />
-                    </button>
-                  </th>
-                  <th className="px-5 py-2.5 font-medium w-20">Aksi</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pageItems.map((s) => (
-                  <tr key={s.id} className="border-b border-primary-50 last:border-0">
-                    <td className="px-5 py-3 font-medium text-ink">
-                      <Link href={`/admin/students/${s.id}`} className="hover:text-primary-700">
-                        {s.full_name}
-                      </Link>
-                    </td>
-                    <td className="px-5 py-3 text-muted">{s.class_name ?? "-"}</td>
-                    <td className="px-5 py-3 text-muted">{s.nis ?? "-"}</td>
-                    <td className="px-5 py-3 text-muted">{s.email}</td>
-                    <td className="px-5 py-3">
-                      <div className="flex items-center gap-2">
-                        <Link
-                          href={`/admin/students/${s.id}`}
-                          className="w-8 h-8 rounded-lg bg-primary-50 hover:bg-primary-100 flex items-center justify-center transition-colors"
-                          title="Lihat detail"
-                        >
-                          <ChevronRight size={14} className="text-primary-700" />
-                        </Link>
-                        <button
-                          onClick={() => handleDelete(s.id, s.full_name)}
-                          disabled={deletingId === s.id}
-                          className="w-8 h-8 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors disabled:opacity-50"
-                          title="Hapus siswa"
-                        >
-                          {deletingId === s.id ? (
-                            <Loader2 size={14} className="animate-spin text-red-600" />
-                          ) : (
-                            <Trash2 size={14} color="#dc2626" />
-                          )}
-                        </button>
-                      </div>
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-muted text-xs border-b border-primary-50">
+                    <SortTh label="Nama" {...sortProps("name")} />
+                    <SortTh label="Kelas" {...sortProps("class")} />
+                    <SortTh label="NIS" {...sortProps("nis")} />
+                    <SortTh label="Email" {...sortProps("email")} />
+                    <th className="px-5 py-3 w-24">Aksi</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-
-            {/* Pagination */}
-            <div className="flex items-center justify-between px-5 py-3 border-t border-primary-50 text-xs text-muted">
-              <span>
-                Menampilkan {(safePage - 1) * PAGE_SIZE + 1}-
-                {Math.min(safePage * PAGE_SIZE, sorted.length)} dari {sorted.length} siswa
-              </span>
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                  disabled={safePage === 1}
-                  className="w-7 h-7 rounded-lg border border-primary-100 flex items-center justify-center disabled:opacity-40 hover:bg-surface transition-colors"
-                >
-                  <ChevronLeft size={14} />
-                </button>
-                <span className="px-2 font-medium text-ink">
-                  {safePage} / {totalPages}
-                </span>
-                <button
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={safePage === totalPages}
-                  className="w-7 h-7 rounded-lg border border-primary-100 flex items-center justify-center disabled:opacity-40 hover:bg-surface transition-colors"
-                >
-                  <ChevronRight size={14} />
-                </button>
-              </div>
+                </thead>
+                <tbody>
+                  {pageItems.map((s, i) => (
+                    <tr
+                      key={s.id}
+                      className="border-b border-primary-50 last:border-0 animate-fadeUp"
+                      style={{ animationDelay: `${i * 35}ms` }}
+                    >
+                      <td className="px-5 py-3">
+                        <div className="flex items-center gap-3">
+                          <Avatar name={s.full_name} />
+                          <Link
+                            href={`/admin/students/${s.id}`}
+                            className="font-semibold text-ink hover:text-primary-700 transition-colors"
+                          >
+                            {s.full_name}
+                          </Link>
+                        </div>
+                      </td>
+                      <td className="px-5 py-3">
+                        {s.class_name ? (
+                          <span className="inline-block bg-primary-50 text-primary-800 text-xs font-semibold px-2.5 py-1 rounded-full">
+                            {s.class_name}
+                          </span>
+                        ) : (
+                          <span className="text-muted">-</span>
+                        )}
+                      </td>
+                      <td className="px-5 py-3 text-muted tabular-nums">{s.nis ?? "-"}</td>
+                      <td className="px-5 py-3 text-muted">{s.email}</td>
+                      <td className="px-5 py-3">
+                        <div className="flex items-center gap-2">
+                          <Link
+                            href={`/admin/students/${s.id}`}
+                            className="group w-8 h-8 rounded-lg bg-primary-50 hover:bg-primary-100 flex items-center justify-center transition-colors"
+                            title="Lihat detail"
+                          >
+                            <ChevronRight
+                              size={14}
+                              className="text-primary-700 transition-transform group-hover:translate-x-0.5"
+                            />
+                          </Link>
+                          <button
+                            onClick={() => handleDelete(s.id, s.full_name)}
+                            disabled={deletingId === s.id}
+                            className="w-8 h-8 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors disabled:opacity-50"
+                            title="Hapus siswa"
+                          >
+                            {deletingId === s.id ? (
+                              <Loader2 size={14} className="animate-spin text-red-600" />
+                            ) : (
+                              <Trash2 size={14} color="#dc2626" />
+                            )}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
+
+            <Pagination
+              page={safePage}
+              totalPages={totalPages}
+              total={sorted.length}
+              pageSize={PAGE_SIZE}
+              noun="siswa"
+              onChange={setPage}
+            />
           </>
         )}
       </div>
 
       {showAddModal && (
-        <AddStudentModal
-          onClose={() => setShowAddModal(false)}
-          onCreated={loadStudents}
-        />
+        <AddStudentModal onClose={() => setShowAddModal(false)} onCreated={loadStudents} />
       )}
 
       {showImportModal && (
-        <ImportStudentsModal
-          onClose={() => setShowImportModal(false)}
-          onImported={loadStudents}
-        />
+        <ImportStudentsModal onClose={() => setShowImportModal(false)} onImported={loadStudents} />
       )}
     </div>
   );

@@ -1,14 +1,27 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import * as XLSX from "xlsx";
-import { Loader2, Upload, Download, CheckCircle2, ArrowRight } from "lucide-react";
+import {
+  Loader2,
+  Upload,
+  Download,
+  CheckCircle2,
+  ArrowRight,
+  ArrowUpCircle,
+  FileSpreadsheet,
+  AlertTriangle,
+  GraduationCap,
+  UserCheck,
+  Clock,
+} from "lucide-react";
 import {
   fetchTahunAjaranList, createTahunAjaran, activateTahunAjaran,
   fetchRosterAktif, promoteStudent, markSiswaLulus,
   type TahunAjaran, type RosterItem,
 } from "@/lib/assessmentService";
 import { parseKelas, ensureKelasId } from "@/lib/kelasClientHelper";
+import { PageHeader, controlCls } from "@/components/ui";
 
 type BarisExcel = { nis: string; kelasBaru: string };
 type BarisSiap = {
@@ -17,6 +30,39 @@ type BarisSiap = {
   hasil: "naik" | "tinggal_kelas";
 };
 type BarisError = { nis: string; kelasBaru: string; pesan: string };
+
+function StepCard({
+  n,
+  title,
+  done,
+  right,
+  children,
+}: {
+  n: number;
+  title: ReactNode;
+  done?: boolean;
+  right?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="bg-white border border-primary-100 rounded-2xl p-5 mb-6 animate-fadeUp">
+      <div className="flex items-center justify-between gap-3 mb-4">
+        <div className="flex items-center gap-3">
+          <span
+            className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold text-white shadow-md shadow-primary-700/25 bg-gradient-to-br ${
+              done ? "from-primary-300 to-primary-600" : "from-primary-500 to-primary-800"
+            }`}
+          >
+            {done ? <CheckCircle2 size={16} /> : n}
+          </span>
+          <h2 className="font-bold text-ink">{title}</h2>
+        </div>
+        {right}
+      </div>
+      {children}
+    </div>
+  );
+}
 
 export default function NaikKelasPage() {
   const [tahunList, setTahunList] = useState<TahunAjaran[]>([]);
@@ -32,6 +78,7 @@ export default function NaikKelasPage() {
   const [errorRows, setErrorRows] = useState<BarisError[]>([]);
   const [belumDitempatkan, setBelumDitempatkan] = useState<RosterItem[]>([]);
   const [otomatisLulus, setOtomatisLulus] = useState<RosterItem[]>([]);
+  const [fileName, setFileName] = useState("");
 
   const [menerapkan, setMenerapkan] = useState(false);
   const [selesai, setSelesai] = useState(false);
@@ -75,6 +122,7 @@ export default function NaikKelasPage() {
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !tahunTarget) return;
+    setFileName(file.name);
 
     const reader = new FileReader();
     reader.onload = (evt) => {
@@ -169,6 +217,7 @@ export default function NaikKelasPage() {
       setErrorRows([]);
       setBelumDitempatkan([]);
       setOtomatisLulus([]);
+      setFileName("");
       setSelesai(false);
       alert("Tahun ajaran baru sudah aktif.");
     } catch (e: any) {
@@ -180,31 +229,50 @@ export default function NaikKelasPage() {
 
   if (loading) {
     return (
-      <div className="p-8">
-        <Loader2 className="animate-spin text-primary-700" size={22} />
+      <div className="p-4 sm:p-8 max-w-3xl flex flex-col gap-4">
+        {[0, 1].map((i) => (
+          <div
+            key={i}
+            className="h-40 rounded-2xl bg-gradient-to-r from-primary-50 via-primary-100 to-primary-50 bg-[length:200%_100%] animate-shimmer"
+          />
+        ))}
       </div>
     );
   }
 
+  const hasPreview =
+    siap.length > 0 || errorRows.length > 0 || belumDitempatkan.length > 0 || otomatisLulus.length > 0;
+
+  const tiles = [
+    { n: siap.length, label: "siswa siap dipindahkan", icon: UserCheck, cls: "bg-primary-50 text-primary-800", show: true },
+    { n: otomatisLulus.length, label: "otomatis lulus (kelas 12)", icon: GraduationCap, cls: "bg-primary-50 text-primary-800", show: true },
+    { n: errorRows.length, label: "baris bermasalah", icon: AlertTriangle, cls: "bg-red-50 text-red-700", show: errorRows.length > 0 },
+    { n: belumDitempatkan.length, label: "belum ditempatkan", icon: Clock, cls: "bg-amber-50 text-amber-800", show: belumDitempatkan.length > 0 },
+  ].filter((t) => t.show);
+
   return (
-    <div className="p-8 max-w-3xl">
-      <h1 className="text-2xl font-bold text-ink mb-1">Naik Kelas</h1>
-      <p className="text-muted text-sm mb-6">
-        Tahun ajaran aktif saat ini: <b>{tahunAktif?.nama ?? "belum ada"}</b> ({roster.length} siswa)
-      </p>
+    <div className="p-4 sm:p-8 max-w-3xl">
+      <PageHeader
+        icon={ArrowUpCircle}
+        title="Naik Kelas"
+        subtitle={
+          <>
+            Tahun ajaran aktif: <b className="text-ink">{tahunAktif?.nama ?? "belum ada"}</b> ({roster.length} siswa)
+          </>
+        }
+      />
 
       {/* Langkah 1: pilih / buat tahun ajaran tujuan */}
-      <div className="bg-white border border-primary-100 rounded-2xl p-5 mb-6">
-        <h2 className="font-semibold text-ink mb-3">1. Tahun ajaran tujuan</h2>
+      <StepCard n={1} title="Tahun ajaran tujuan" done={!!tahunTarget}>
         <div className="flex flex-wrap gap-2 mb-3">
           {tahunList.filter((t) => !t.is_active).map((t) => (
             <button
               key={t.id}
               onClick={() => setTahunTarget(t)}
-              className={`px-3.5 py-2 rounded-xl text-sm font-medium border ${
+              className={`px-3.5 py-2 rounded-xl text-sm font-medium border transition-all ${
                 tahunTarget?.id === t.id
                   ? "bg-primary-700 text-white border-primary-700"
-                  : "bg-white text-ink border-primary-100 hover:bg-surface"
+                  : "bg-white text-ink border-primary-100 hover:bg-primary-50 hover:border-primary-300"
               }`}
             >
               {t.nama}
@@ -216,92 +284,103 @@ export default function NaikKelasPage() {
             value={namaTahunBaru}
             onChange={(e) => setNamaTahunBaru(e.target.value)}
             placeholder="Tahun ajaran baru, contoh: 2027/2028"
-            className="flex-1 bg-surface border border-primary-100 rounded-xl px-3.5 py-2.5 text-sm outline-none focus:border-primary-700"
+            className={`${controlCls} flex-1 bg-surface`}
           />
           <button
             onClick={handleBuatTahun}
             disabled={membuatTahun || !namaTahunBaru.trim()}
-            className="flex items-center gap-2 bg-primary-700 hover:bg-primary-800 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2.5 rounded-xl"
+            className="flex items-center gap-2 bg-primary-700 hover:bg-primary-800 disabled:opacity-50 text-white text-sm font-semibold px-5 py-2.5 rounded-xl"
           >
             {membuatTahun && <Loader2 className="animate-spin" size={14} />}
             Buat
           </button>
         </div>
-      </div>
+      </StepCard>
 
       {tahunTarget && (
         <>
           {/* Langkah 2: upload excel */}
-          <div className="bg-white border border-primary-100 rounded-2xl p-5 mb-6">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="font-semibold text-ink">
-                2. Upload daftar kenaikan ke <span className="text-primary-700">{tahunTarget.nama}</span>
-              </h2>
+          <StepCard
+            n={2}
+            done={hasPreview}
+            title={
+              <>
+                Upload daftar kenaikan ke <span className="text-primary-700">{tahunTarget.nama}</span>
+              </>
+            }
+            right={
               <button
                 onClick={handleDownloadTemplate}
-                className="flex items-center gap-1.5 text-sm text-primary-700 hover:underline"
+                className="flex items-center gap-1.5 text-sm font-semibold text-primary-700 hover:text-primary-800 bg-primary-50 hover:bg-primary-100 px-3 py-1.5 rounded-lg transition-colors"
               >
                 <Download size={14} />
                 Template
               </button>
-            </div>
-            <label className="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-primary-100 rounded-xl py-8 cursor-pointer hover:border-primary-700">
-              <Upload size={22} className="text-primary-700" />
-              <span className="text-sm text-ink font-medium">Klik untuk pilih file Excel (kolom: NIS, Kelas Baru)</span>
+            }
+          >
+            <label className="group flex flex-col items-center justify-center gap-2.5 border-2 border-dashed border-primary-200 rounded-2xl py-9 cursor-pointer transition-all hover:border-primary-500 hover:bg-primary-50/60">
+              <div className="w-12 h-12 rounded-2xl bg-primary-50 group-hover:bg-white flex items-center justify-center transition-all group-hover:-translate-y-1 group-hover:shadow-lg group-hover:shadow-primary-700/15">
+                {fileName ? (
+                  <FileSpreadsheet size={22} className="text-primary-600" />
+                ) : (
+                  <Upload size={22} className="text-primary-600" />
+                )}
+              </div>
+              <span className="text-sm text-ink font-semibold">
+                {fileName || "Klik untuk pilih file Excel"}
+              </span>
+              <span className="text-xs text-muted">Kolom: NIS, Kelas Baru (.xlsx, .xls, .csv)</span>
               <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFile} className="hidden" />
             </label>
-          </div>
+          </StepCard>
 
           {/* Langkah 3: pratinjau */}
-          {(siap.length > 0 || errorRows.length > 0 || belumDitempatkan.length > 0 || otomatisLulus.length > 0) && (
-            <div className="bg-white border border-primary-100 rounded-2xl p-5 mb-6">
-              <h2 className="font-semibold text-ink mb-3">3. Pratinjau</h2>
-
-              <div className="grid grid-cols-2 gap-3 mb-4 text-sm">
-                <div className="bg-primary-50 rounded-xl px-3.5 py-2.5">
-                  <span className="font-semibold text-primary-800">{siap.length}</span> siswa siap dipindahkan
-                </div>
-                <div className="bg-primary-50 rounded-xl px-3.5 py-2.5">
-                  <span className="font-semibold text-primary-800">{otomatisLulus.length}</span> otomatis lulus (kelas 12)
-                </div>
-                {errorRows.length > 0 && (
-                  <div className="bg-red-50 rounded-xl px-3.5 py-2.5 text-red-700">
-                    <span className="font-semibold">{errorRows.length}</span> baris bermasalah
-                  </div>
-                )}
-                {belumDitempatkan.length > 0 && (
-                  <div className="bg-yellow-50 rounded-xl px-3.5 py-2.5 text-yellow-800">
-                    <span className="font-semibold">{belumDitempatkan.length}</span> belum ditempatkan
-                  </div>
-                )}
+          {hasPreview && (
+            <StepCard n={3} title="Pratinjau" done={selesai}>
+              <div className="grid sm:grid-cols-2 gap-3 mb-5 text-sm">
+                {tiles.map((t) => {
+                  const Icon = t.icon;
+                  return (
+                    <div key={t.label} className={`flex items-center gap-3 rounded-xl px-3.5 py-3 ${t.cls}`}>
+                      <Icon size={18} />
+                      <span>
+                        <span className="font-extrabold text-base">{t.n}</span> {t.label}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
 
               {errorRows.length > 0 && (
-                <div className="mb-4">
-                  <p className="text-sm font-semibold text-ink mb-1">Baris bermasalah:</p>
+                <div className="mb-4 rounded-xl bg-red-50/60 border border-red-100 p-3.5">
+                  <p className="text-sm font-semibold text-red-800 mb-1">Baris bermasalah:</p>
                   <ul className="text-sm text-red-700 list-disc pl-5">
                     {errorRows.map((r, i) => (
-                      <li key={i}>NIS {r.nis || "-"}: {r.pesan}</li>
+                      <li key={i}>
+                        NIS {r.nis || "-"}: {r.pesan}
+                      </li>
                     ))}
                   </ul>
                 </div>
               )}
 
               {belumDitempatkan.length > 0 && (
-                <div className="mb-4">
-                  <p className="text-sm font-semibold text-ink mb-1">
+                <div className="mb-4 rounded-xl bg-amber-50/60 border border-amber-100 p-3.5">
+                  <p className="text-sm font-semibold text-amber-900 mb-1">
                     Belum ditempatkan (tidak akan diubah, tetap di kelas lama):
                   </p>
                   <ul className="text-sm text-muted list-disc pl-5">
                     {belumDitempatkan.map((r) => (
-                      <li key={r.siswa_id}>{r.nama} — {r.nis} ({r.kelas_nama})</li>
+                      <li key={r.siswa_id}>
+                        {r.nama} — {r.nis} ({r.kelas_nama})
+                      </li>
                     ))}
                   </ul>
                 </div>
               )}
 
               {siap.length > 0 && !selesai && (
-                <div className="border border-primary-100 rounded-xl overflow-hidden max-h-64 overflow-y-auto mb-4">
+                <div className="border border-primary-100 rounded-xl overflow-hidden max-h-64 overflow-y-auto mb-5">
                   <table className="w-full text-xs">
                     <thead className="sticky top-0 bg-surface">
                       <tr className="text-left text-muted">
@@ -315,15 +394,21 @@ export default function NaikKelasPage() {
                     <tbody>
                       {siap.map((r) => (
                         <tr key={r.roster.siswa_id} className="border-t border-primary-50">
-                          <td className="px-3 py-1.5 text-ink">{r.roster.nama}</td>
-                          <td className="px-3 py-1.5 text-muted">{r.roster.kelas_nama}</td>
-                          <td className="px-3 py-1.5 text-muted"><ArrowRight size={12} /></td>
-                          <td className="px-3 py-1.5 text-ink">{r.kelasBaru!.nama}</td>
-                          <td className="px-3 py-1.5">
+                          <td className="px-3 py-2 text-ink font-medium">{r.roster.nama}</td>
+                          <td className="px-3 py-2 text-muted">{r.roster.kelas_nama}</td>
+                          <td className="px-3 py-2 text-primary-500">
+                            <ArrowRight size={12} />
+                          </td>
+                          <td className="px-3 py-2 text-ink font-medium">{r.kelasBaru!.nama}</td>
+                          <td className="px-3 py-2">
                             {r.hasil === "naik" ? (
-                              <span className="text-primary-700">Naik</span>
+                              <span className="bg-primary-50 text-primary-700 font-semibold px-2 py-0.5 rounded-full">
+                                Naik
+                              </span>
                             ) : (
-                              <span className="text-yellow-700">Tinggal kelas</span>
+                              <span className="bg-amber-50 text-amber-700 font-semibold px-2 py-0.5 rounded-full">
+                                Tinggal kelas
+                              </span>
                             )}
                           </td>
                         </tr>
@@ -343,22 +428,22 @@ export default function NaikKelasPage() {
                   Terapkan Kenaikan Kelas
                 </button>
               ) : (
-                <div>
-                  <div className="flex items-center gap-2 text-primary-700 text-sm font-semibold mb-3">
-                    <CheckCircle2 size={16} />
+                <div className="animate-fadeUp">
+                  <div className="flex items-center gap-2 text-primary-700 text-sm font-semibold mb-3 bg-primary-50 rounded-xl px-3.5 py-3">
+                    <CheckCircle2 size={17} />
                     Data sudah dipindahkan ke {tahunTarget.nama}.
                   </div>
                   <button
                     onClick={handleAktifkan}
                     disabled={mengaktifkan}
-                    className="w-full flex items-center justify-center gap-2 bg-yellow-600 hover:bg-yellow-700 disabled:opacity-50 text-white font-semibold text-sm rounded-xl py-3"
+                    className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:brightness-105 disabled:opacity-50 text-white font-semibold text-sm rounded-xl py-3 shadow-lg shadow-amber-600/25 transition-all hover:-translate-y-0.5"
                   >
                     {mengaktifkan && <Loader2 className="animate-spin" size={16} />}
                     Aktifkan Tahun Ajaran {tahunTarget.nama}
                   </button>
                 </div>
               )}
-            </div>
+            </StepCard>
           )}
         </>
       )}
