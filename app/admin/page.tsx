@@ -13,6 +13,7 @@ import {
   Activity,
   CheckCircle2,
   ChevronRight,
+  ChevronLeft,
   PieChartIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -42,8 +43,9 @@ const STAT_CARDS = [
 
 const CHART_COLORS = ["#0a7d4e", "#14b8a6", "#84cc16", "#047857", "#f59e0b", "#0d9488", "#65a30d"];
 
-const BELUM_LIMIT = 6;
-const TERBARU_LIMIT = 8;
+const BELUM_PER_PAGE = 6;
+const KELAS_PER_PAGE = 5;
+const TERBARU_PER_PAGE = 8;
 
 /* ---------- helpers ---------- */
 
@@ -61,6 +63,24 @@ function useCountUp(target: number, duration = 1000) {
     return () => cancelAnimationFrame(raf);
   }, [target, duration]);
   return value;
+}
+
+function usePagination<T>(items: T[], pageSize: number) {
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+
+  // kalau data berkurang & halaman aktif melebihi total, mundurkan
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  const current = Math.min(page, totalPages);
+  const pageItems = useMemo(
+    () => items.slice((current - 1) * pageSize, current * pageSize),
+    [items, current, pageSize]
+  );
+
+  return { page: current, setPage, totalPages, pageItems, total: items.length, pageSize };
 }
 
 function timeAgo(iso: string) {
@@ -150,6 +170,57 @@ function Panel({
   );
 }
 
+function Pagination({
+  page,
+  totalPages,
+  total,
+  pageSize,
+  onChange,
+}: {
+  page: number;
+  totalPages: number;
+  total: number;
+  pageSize: number;
+  onChange: (p: number) => void;
+}) {
+  if (totalPages <= 1) return null;
+  const from = (page - 1) * pageSize + 1;
+  const to = Math.min(page * pageSize, total);
+  const btn =
+    "w-8 h-8 rounded-lg flex items-center justify-center text-primary-700 border border-primary-100 transition-colors hover:bg-primary-50 disabled:opacity-40 disabled:pointer-events-none";
+
+  return (
+    <div className="mt-auto flex items-center justify-between gap-3 px-5 py-3 border-t border-primary-50">
+      <span className="text-xs text-muted tabular-nums">
+        {from}–{to} dari {total}
+      </span>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          className={btn}
+          disabled={page === 1}
+          onClick={() => onChange(page - 1)}
+          aria-label="Halaman sebelumnya"
+        >
+          <ChevronLeft size={16} />
+        </button>
+        <span className="text-xs font-semibold text-ink tabular-nums min-w-[3rem] text-center">
+          {page} / {totalPages}
+        </span>
+        <button
+          type="button"
+          className={btn}
+          disabled={page === totalPages}
+          onClick={() => onChange(page + 1)}
+          aria-label="Halaman berikutnya"
+        >
+          <ChevronRight size={16} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const rowCls =
   "group flex items-center gap-3 px-5 py-3 border-b border-primary-50 last:border-0 transition-colors hover:bg-primary-50/60 animate-fadeUp";
 
@@ -223,11 +294,15 @@ export default function DashboardPage() {
       pct: totalA ? Math.min(100, Math.round((c.pairs / (c.students * totalA)) * 100)) : 0,
     })).sort((a, b) => a.pct - b.pct || a.name.localeCompare(b.name, "id"));
 
-    // 3) Aktivitas terbaru
-    const terbaru = [...results].sort(byDateDesc).slice(0, TERBARU_LIMIT);
+    // 3) Aktivitas terbaru (semua, diurutkan; dipaginasi di UI)
+    const terbaru = [...results].sort(byDateDesc);
 
     return { belumMengisi, belumMulai, kelasProgress, terbaru };
   }, [students, results, assessments]);
+
+  const belumPg = usePagination(belumMengisi, BELUM_PER_PAGE);
+  const kelasPg = usePagination(kelasProgress, KELAS_PER_PAGE);
+  const terbaruPg = usePagination(terbaru, TERBARU_PER_PAGE);
 
   const totalA = assessments.length;
   const donutTotal = chartData.reduce((sum, d) => sum + d.count, 0);
@@ -304,12 +379,12 @@ export default function DashboardPage() {
               ) : (
                 <>
                   <div>
-                    {belumMengisi.slice(0, BELUM_LIMIT).map(({ s, n }, i) => (
+                    {belumPg.pageItems.map(({ s, n }, i) => (
                       <Link
                         key={s.id}
                         href={`/admin/students/${s.id}`}
                         className={rowCls}
-                        style={{ animationDelay: `${360 + i * 45}ms` }}
+                        style={{ animationDelay: `${i * 45}ms` }}
                       >
                         <Avatar name={s.full_name} size={34} />
                         <div className="min-w-0 flex-1">
@@ -336,14 +411,13 @@ export default function DashboardPage() {
                       </Link>
                     ))}
                   </div>
-                  {belumMengisi.length > BELUM_LIMIT && (
-                    <Link
-                      href="/admin/students"
-                      className="mt-auto px-5 py-3 text-xs font-semibold text-primary-700 hover:bg-primary-50 border-t border-primary-50 transition-colors"
-                    >
-                      +{belumMengisi.length - BELUM_LIMIT} siswa lainnya • Lihat semua siswa
-                    </Link>
-                  )}
+                  <Pagination
+                    page={belumPg.page}
+                    totalPages={belumPg.totalPages}
+                    total={belumPg.total}
+                    pageSize={belumPg.pageSize}
+                    onChange={belumPg.setPage}
+                  />
                 </>
               )}
             </Panel>
@@ -430,31 +504,40 @@ export default function DashboardPage() {
               {kelasProgress.length === 0 ? (
                 <EmptyState icon={School} text="Belum ada data kelas siswa." />
               ) : (
-                <div className="max-h-[22rem] overflow-y-auto">
-                  {kelasProgress.map((c, i) => (
-                    <div
-                      key={c.name}
-                      className="px-5 py-3 border-b border-primary-50 last:border-0 animate-fadeUp"
-                      style={{ animationDelay: `${520 + Math.min(i, 8) * 45}ms` }}
-                    >
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-sm font-semibold text-ink">{c.name}</span>
-                        <span className="text-xs text-muted tabular-nums">
-                          {c.students} siswa •{" "}
-                          <b className={c.pct < 34 ? "text-amber-700" : "text-ink"}>{c.pct}%</b>
-                        </span>
+                <>
+                  <div>
+                    {kelasPg.pageItems.map((c, i) => (
+                      <div
+                        key={c.name}
+                        className="px-5 py-3 border-b border-primary-50 last:border-0 animate-fadeUp"
+                        style={{ animationDelay: `${i * 45}ms` }}
+                      >
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-sm font-semibold text-ink">{c.name}</span>
+                          <span className="text-xs text-muted tabular-nums">
+                            {c.students} siswa •{" "}
+                            <b className={c.pct < 34 ? "text-amber-700" : "text-ink"}>{c.pct}%</b>
+                          </span>
+                        </div>
+                        <div className="h-2 bg-surface rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all duration-700 bg-gradient-to-r ${
+                              c.pct < 34 ? "from-amber-300 to-amber-500" : "from-primary-400 to-primary-700"
+                            }`}
+                            style={{ width: `${Math.max(c.pct, 2)}%` }}
+                          />
+                        </div>
                       </div>
-                      <div className="h-2 bg-surface rounded-full overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all duration-700 bg-gradient-to-r ${
-                            c.pct < 34 ? "from-amber-300 to-amber-500" : "from-primary-400 to-primary-700"
-                          }`}
-                          style={{ width: `${Math.max(c.pct, 2)}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                  <Pagination
+                    page={kelasPg.page}
+                    totalPages={kelasPg.totalPages}
+                    total={kelasPg.total}
+                    pageSize={kelasPg.pageSize}
+                    onChange={kelasPg.setPage}
+                  />
+                </>
               )}
             </Panel>
 
@@ -467,32 +550,41 @@ export default function DashboardPage() {
               {terbaru.length === 0 ? (
                 <EmptyState icon={Activity} text="Belum ada hasil asesmen yang masuk." />
               ) : (
-                <div>
-                  {terbaru.map((r, i) => (
-                    <Link
-                      key={r.id}
-                      href={`/admin/students/${r.student_id}`}
-                      className={rowCls}
-                      style={{ animationDelay: `${600 + i * 45}ms` }}
-                    >
-                      <Avatar name={r.profiles?.full_name} size={34} />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm text-ink truncate">
-                          <b>{r.profiles?.full_name ?? "-"}</b>{" "}
-                          <span className="text-muted">menyelesaikan</span>{" "}
-                          {r.assessments?.title ?? "asesmen"}
-                        </p>
-                        <p className="text-xs text-muted truncate">
-                          {r.profiles?.class_name ?? "Tanpa kelas"}
-                          {r.category ? ` • ${r.category}` : ""}
-                        </p>
-                      </div>
-                      <span className="text-[11px] text-muted shrink-0 bg-surface px-2.5 py-1 rounded-full">
-                        {timeAgo(r.created_at)}
-                      </span>
-                    </Link>
-                  ))}
-                </div>
+                <>
+                  <div>
+                    {terbaruPg.pageItems.map((r, i) => (
+                      <Link
+                        key={r.id}
+                        href={`/admin/students/${r.student_id}`}
+                        className={rowCls}
+                        style={{ animationDelay: `${i * 45}ms` }}
+                      >
+                        <Avatar name={r.profiles?.full_name} size={34} />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm text-ink truncate">
+                            <b>{r.profiles?.full_name ?? "-"}</b>{" "}
+                            <span className="text-muted">menyelesaikan</span>{" "}
+                            {r.assessments?.title ?? "asesmen"}
+                          </p>
+                          <p className="text-xs text-muted truncate">
+                            {r.profiles?.class_name ?? "Tanpa kelas"}
+                            {r.category ? ` • ${r.category}` : ""}
+                          </p>
+                        </div>
+                        <span className="text-[11px] text-muted shrink-0 bg-surface px-2.5 py-1 rounded-full">
+                          {timeAgo(r.created_at)}
+                        </span>
+                      </Link>
+                    ))}
+                  </div>
+                  <Pagination
+                    page={terbaruPg.page}
+                    totalPages={terbaruPg.totalPages}
+                    total={terbaruPg.total}
+                    pageSize={terbaruPg.pageSize}
+                    onChange={terbaruPg.setPage}
+                  />
+                </>
               )}
             </Panel>
           </div>
