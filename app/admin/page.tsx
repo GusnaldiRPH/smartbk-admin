@@ -13,7 +13,6 @@ import {
   Activity,
   CheckCircle2,
   ChevronRight,
-  ChevronLeft,
   PieChartIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -23,9 +22,13 @@ import {
   fetchResultCountsByAssessment,
   fetchAllResults,
   fetchAllStudents,
-  fetchAssessmentsForAdmin,
 } from "@/lib/assessmentService";
-import { Avatar, EmptyState } from "@/components/ui";
+import {
+  fetchAssessmentsWithTingkat,
+  fetchStudentTingkatMap,
+  type AssessmentAdmin,
+} from "@/lib/assessmentAdminService";
+import { Avatar, EmptyState, Pagination } from "@/components/ui";
 
 interface Stats {
   totalStudents: number;
@@ -43,9 +46,15 @@ const STAT_CARDS = [
 
 const CHART_COLORS = ["#0a7d4e", "#14b8a6", "#84cc16", "#047857", "#f59e0b", "#0d9488", "#65a30d"];
 
-const BELUM_PER_PAGE = 6;
-const KELAS_PER_PAGE = 5;
-const TERBARU_PER_PAGE = 8;
+const TINGKAT_OPTIONS = [
+  { value: 0, label: "Semua" },
+  { value: 10, label: "Kelas X" },
+  { value: 11, label: "Kelas XI" },
+  { value: 12, label: "Kelas XII" },
+];
+
+const BELUM_PAGE_SIZE = 6;
+const TERBARU_LIMIT = 8;
 
 /* ---------- helpers ---------- */
 
@@ -63,24 +72,6 @@ function useCountUp(target: number, duration = 1000) {
     return () => cancelAnimationFrame(raf);
   }, [target, duration]);
   return value;
-}
-
-function usePagination<T>(items: T[], pageSize: number) {
-  const [page, setPage] = useState(1);
-  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
-
-  // kalau data berkurang & halaman aktif melebihi total, mundurkan
-  useEffect(() => {
-    if (page > totalPages) setPage(totalPages);
-  }, [page, totalPages]);
-
-  const current = Math.min(page, totalPages);
-  const pageItems = useMemo(
-    () => items.slice((current - 1) * pageSize, current * pageSize),
-    [items, current, pageSize]
-  );
-
-  return { page: current, setPage, totalPages, pageItems, total: items.length, pageSize };
 }
 
 function timeAgo(iso: string) {
@@ -170,57 +161,6 @@ function Panel({
   );
 }
 
-function Pagination({
-  page,
-  totalPages,
-  total,
-  pageSize,
-  onChange,
-}: {
-  page: number;
-  totalPages: number;
-  total: number;
-  pageSize: number;
-  onChange: (p: number) => void;
-}) {
-  if (totalPages <= 1) return null;
-  const from = (page - 1) * pageSize + 1;
-  const to = Math.min(page * pageSize, total);
-  const btn =
-    "w-8 h-8 rounded-lg flex items-center justify-center text-primary-700 border border-primary-100 transition-colors hover:bg-primary-50 disabled:opacity-40 disabled:pointer-events-none";
-
-  return (
-    <div className="mt-auto flex items-center justify-between gap-3 px-5 py-3 border-t border-primary-50">
-      <span className="text-xs text-muted tabular-nums">
-        {from}–{to} dari {total}
-      </span>
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          className={btn}
-          disabled={page === 1}
-          onClick={() => onChange(page - 1)}
-          aria-label="Halaman sebelumnya"
-        >
-          <ChevronLeft size={16} />
-        </button>
-        <span className="text-xs font-semibold text-ink tabular-nums min-w-[3rem] text-center">
-          {page} / {totalPages}
-        </span>
-        <button
-          type="button"
-          className={btn}
-          disabled={page === totalPages}
-          onClick={() => onChange(page + 1)}
-          aria-label="Halaman berikutnya"
-        >
-          <ChevronRight size={16} />
-        </button>
-      </div>
-    </div>
-  );
-}
-
 const rowCls =
   "group flex items-center gap-3 px-5 py-3 border-b border-primary-50 last:border-0 transition-colors hover:bg-primary-50/60 animate-fadeUp";
 
@@ -234,8 +174,11 @@ export default function DashboardPage() {
   const [chartData, setChartData] = useState<{ title: string; count: number }[]>([]);
   const [students, setStudents] = useState<any[]>([]);
   const [results, setResults] = useState<any[]>([]);
-  const [assessments, setAssessments] = useState<any[]>([]);
+  const [scopes, setScopes] = useState<AssessmentAdmin[]>([]);
+  const [tingkatMap, setTingkatMap] = useState<Map<string, number>>(new Map());
   const [loading, setLoading] = useState(true);
+  const [belumPage, setBelumPage] = useState(1);
+  const [tingkatFilter, setTingkatFilter] = useState(0); // 0 = semua tingkat
 
   useEffect(() => {
     Promise.all([
@@ -243,21 +186,24 @@ export default function DashboardPage() {
       fetchResultCountsByAssessment(),
       fetchAllStudents(),
       fetchAllResults(),
-      fetchAssessmentsForAdmin(),
+      fetchAssessmentsWithTingkat(),
+      fetchStudentTingkatMap(),
     ])
-      .then(([s, c, st, r, a]) => {
+      .then(([s, c, st, r, a, tm]) => {
         setStats(s);
         setChartData(c);
         setStudents(st);
         setResults(r);
-        setAssessments(a);
+        setScopes(a);
+        setTingkatMap(tm);
       })
       .catch((err) => console.error("Gagal memuat dashboard:", err))
       .finally(() => setLoading(false));
   }, []);
 
-  const { belumMengisi, belumMulai, kelasProgress, terbaru } = useMemo(() => {
-    const totalA = assessments.length;
+  const { belumMengisi, belumMulai, kelasProgress, terbaru, tanpaKelas } = useMemo(() => {
+    // Hanya asesmen AKTIF yang dihitung sebagai kewajiban siswa.
+    const activeScopes = scopes.filter((a) => a.is_active);
 
     // siswa -> set asesmen yang sudah dikerjakan
     const done = new Map<string, Set<string>>();
@@ -266,46 +212,69 @@ export default function DashboardPage() {
       done.get(r.student_id)!.add(r.assessment_id);
     });
 
-    // 1) Siswa yang belum mengisi (belum lengkap)
-    const belumMengisi =
-      totalA === 0
-        ? []
-        : students
-            .map((s) => ({ s, n: Math.min(done.get(s.id)?.size ?? 0, totalA) }))
-            .filter((x) => x.n < totalA)
-            .sort(
-              (a, b) =>
-                a.n - b.n || String(a.s.full_name).localeCompare(String(b.s.full_name), "id")
-            );
-    const belumMulai = belumMengisi.filter((x) => x.n === 0).length;
-
-    // 2) Progres pengisian per kelas (rata-rata kelengkapan asesmen)
-    const byClass = new Map<string, { students: number; pairs: number }>();
+    // Tiap siswa hanya dibandingkan dengan asesmen yang berlaku untuk TINGKAT-nya.
+    type Row = { s: any; t: number; n: number; total: number };
+    const allRows: Row[] = [];
+    let tanpaKelas = 0;
     students.forEach((s) => {
-      if (!s.class_name) return;
-      const c = byClass.get(s.class_name) ?? { students: 0, pairs: 0 };
+      const t = tingkatMap.get(s.id);
+      if (t == null) {
+        tanpaKelas += 1; // belum punya kelas aktif -> tidak melihat asesmen apa pun di aplikasi
+        return;
+      }
+      const required = activeScopes.filter((a) => a.tingkat.includes(t));
+      if (required.length === 0) return;
+      const doneSet = done.get(s.id);
+      const n = required.filter((a) => doneSet?.has(a.id)).length;
+      allRows.push({ s, t, n, total: required.length });
+    });
+
+    const rows = tingkatFilter ? allRows.filter((r) => r.t === tingkatFilter) : allRows;
+
+    // 1) Siswa yang belum mengisi (belum lengkap)
+    const belumMengisi = rows
+      .filter((r) => r.n < r.total)
+      .sort(
+        (a, b) =>
+          a.n / a.total - b.n / b.total ||
+          String(a.s.full_name).localeCompare(String(b.s.full_name), "id")
+      );
+    const belumMulai = belumMengisi.filter((r) => r.n === 0).length;
+
+    // 2) Progres pengisian per kelas
+    const byClass = new Map<string, { students: number; done: number; total: number }>();
+    rows.forEach((r) => {
+      if (!r.s.class_name) return;
+      const c = byClass.get(r.s.class_name) ?? { students: 0, done: 0, total: 0 };
       c.students += 1;
-      c.pairs += Math.min(done.get(s.id)?.size ?? 0, totalA);
-      byClass.set(s.class_name, c);
+      c.done += r.n;
+      c.total += r.total;
+      byClass.set(r.s.class_name, c);
     });
     const kelasProgress = Array.from(byClass, ([name, c]) => ({
       name,
       students: c.students,
-      pct: totalA ? Math.min(100, Math.round((c.pairs / (c.students * totalA)) * 100)) : 0,
+      pct: c.total ? Math.min(100, Math.round((c.done / c.total) * 100)) : 0,
     })).sort((a, b) => a.pct - b.pct || a.name.localeCompare(b.name, "id"));
 
-    // 3) Aktivitas terbaru (semua, diurutkan; dipaginasi di UI)
-    const terbaru = [...results].sort(byDateDesc);
+    // 3) Aktivitas terbaru (ikut filter tingkat)
+    const terbaru = results
+      .filter((r) => !tingkatFilter || tingkatMap.get(r.student_id) === tingkatFilter)
+      .sort(byDateDesc)
+      .slice(0, TERBARU_LIMIT);
 
-    return { belumMengisi, belumMulai, kelasProgress, terbaru };
-  }, [students, results, assessments]);
+    return { belumMengisi, belumMulai, kelasProgress, terbaru, tanpaKelas };
+  }, [students, results, scopes, tingkatMap, tingkatFilter]);
 
-  const belumPg = usePagination(belumMengisi, BELUM_PER_PAGE);
-  const kelasPg = usePagination(kelasProgress, KELAS_PER_PAGE);
-  const terbaruPg = usePagination(terbaru, TERBARU_PER_PAGE);
+  const belumTotalPages = Math.max(1, Math.ceil(belumMengisi.length / BELUM_PAGE_SIZE));
+  const belumSafePage = Math.min(belumPage, belumTotalPages);
+  const belumItems = belumMengisi.slice(
+    (belumSafePage - 1) * BELUM_PAGE_SIZE,
+    belumSafePage * BELUM_PAGE_SIZE
+  );
 
-  const totalA = assessments.length;
   const donutTotal = chartData.reduce((sum, d) => sum + d.count, 0);
+  const tingkatLabel = TINGKAT_OPTIONS.find((o) => o.value === tingkatFilter)?.label ?? "Semua";
 
   const today = new Date().toLocaleDateString("id-ID", {
     weekday: "long",
@@ -355,6 +324,37 @@ export default function DashboardPage() {
             ))}
           </div>
 
+          {/* Filter tingkat */}
+          <div
+            className="flex flex-wrap items-center gap-x-4 gap-y-2 mb-5 animate-fadeUp"
+            style={{ animationDelay: "260ms" }}
+          >
+            <span className="text-xs font-bold text-ink uppercase tracking-wider">Tingkat</span>
+            <div className="inline-flex gap-1 p-1 rounded-xl bg-white border border-primary-100">
+              {TINGKAT_OPTIONS.map((o) => (
+                <button
+                  key={o.value}
+                  onClick={() => {
+                    setTingkatFilter(o.value);
+                    setBelumPage(1);
+                  }}
+                  className={`px-3.5 py-1.5 rounded-lg text-sm font-semibold transition-all ${
+                    tingkatFilter === o.value
+                      ? "bg-primary-700 text-white shadow-sm"
+                      : "text-muted hover:bg-primary-50 hover:text-primary-800"
+                  }`}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            {tanpaKelas > 0 && (
+              <span className="text-xs text-amber-800 bg-amber-50 px-3 py-1.5 rounded-full font-medium">
+                {tanpaKelas} siswa belum punya kelas aktif, tidak ikut dihitung
+              </span>
+            )}
+          </div>
+
           {/* Baris 1: belum mengisi + diagram lingkaran aktivitas asesmen */}
           <div className="grid lg:grid-cols-2 gap-5 mb-5">
             <Panel
@@ -362,8 +362,10 @@ export default function DashboardPage() {
               title="Belum Mengisi Asesmen"
               subtitle={
                 belumMengisi.length === 0
-                  ? "Semua siswa sudah menyelesaikan asesmen"
-                  : `${belumMulai} belum mulai sama sekali • ${belumMengisi.length - belumMulai} baru sebagian`
+                  ? tingkatFilter
+                    ? `Semua siswa ${tingkatLabel} sudah menyelesaikan asesmennya`
+                    : "Semua siswa sudah menyelesaikan asesmen"
+                  : `${belumMulai} belum mulai sama sekali • ${belumMengisi.length - belumMulai} baru sebagian • hanya asesmen untuk tingkatnya`
               }
               delay={300}
               badge={
@@ -375,11 +377,14 @@ export default function DashboardPage() {
               }
             >
               {belumMengisi.length === 0 ? (
-                <EmptyState icon={CheckCircle2} text="Mantap! Semua siswa sudah menyelesaikan seluruh asesmen." />
+                <EmptyState
+                  icon={CheckCircle2}
+                  text="Mantap! Semua siswa sudah menyelesaikan seluruh asesmen yang berlaku untuk tingkatnya."
+                />
               ) : (
                 <>
                   <div>
-                    {belumPg.pageItems.map(({ s, n }, i) => (
+                    {belumItems.map(({ s, n, total }, i) => (
                       <Link
                         key={s.id}
                         href={`/admin/students/${s.id}`}
@@ -393,14 +398,14 @@ export default function DashboardPage() {
                         </div>
                         <div className="w-24 shrink-0">
                           <div className="flex justify-end text-[11px] text-muted mb-1 tabular-nums">
-                            {n}/{totalA} asesmen
+                            {n}/{total} asesmen
                           </div>
                           <div className="h-1.5 bg-surface rounded-full overflow-hidden">
                             <div
                               className={`h-full rounded-full ${
                                 n === 0 ? "bg-amber-400" : "bg-gradient-to-r from-primary-400 to-primary-700"
                               }`}
-                              style={{ width: `${Math.round((n / totalA) * 100)}%` }}
+                              style={{ width: `${Math.round((n / total) * 100)}%` }}
                             />
                           </div>
                         </div>
@@ -411,13 +416,19 @@ export default function DashboardPage() {
                       </Link>
                     ))}
                   </div>
-                  <Pagination
-                    page={belumPg.page}
-                    totalPages={belumPg.totalPages}
-                    total={belumPg.total}
-                    pageSize={belumPg.pageSize}
-                    onChange={belumPg.setPage}
-                  />
+
+                  {belumMengisi.length > BELUM_PAGE_SIZE && (
+                    <div className="mt-auto">
+                      <Pagination
+                        page={belumSafePage}
+                        totalPages={belumTotalPages}
+                        total={belumMengisi.length}
+                        pageSize={BELUM_PAGE_SIZE}
+                        noun="siswa"
+                        onChange={setBelumPage}
+                      />
+                    </div>
+                  )}
                 </>
               )}
             </Panel>
@@ -502,89 +513,71 @@ export default function DashboardPage() {
               delay={460}
             >
               {kelasProgress.length === 0 ? (
-                <EmptyState icon={School} text="Belum ada data kelas siswa." />
+                <EmptyState icon={School} text="Belum ada data kelas untuk tingkat ini." />
               ) : (
-                <>
-                  <div>
-                    {kelasPg.pageItems.map((c, i) => (
-                      <div
-                        key={c.name}
-                        className="px-5 py-3 border-b border-primary-50 last:border-0 animate-fadeUp"
-                        style={{ animationDelay: `${i * 45}ms` }}
-                      >
-                        <div className="flex items-center justify-between mb-1.5">
-                          <span className="text-sm font-semibold text-ink">{c.name}</span>
-                          <span className="text-xs text-muted tabular-nums">
-                            {c.students} siswa •{" "}
-                            <b className={c.pct < 34 ? "text-amber-700" : "text-ink"}>{c.pct}%</b>
-                          </span>
-                        </div>
-                        <div className="h-2 bg-surface rounded-full overflow-hidden">
-                          <div
-                            className={`h-full rounded-full transition-all duration-700 bg-gradient-to-r ${
-                              c.pct < 34 ? "from-amber-300 to-amber-500" : "from-primary-400 to-primary-700"
-                            }`}
-                            style={{ width: `${Math.max(c.pct, 2)}%` }}
-                          />
-                        </div>
+                <div className="max-h-[22rem] overflow-y-auto">
+                  {kelasProgress.map((c, i) => (
+                    <div
+                      key={c.name}
+                      className="px-5 py-3 border-b border-primary-50 last:border-0 animate-fadeUp"
+                      style={{ animationDelay: `${520 + Math.min(i, 8) * 45}ms` }}
+                    >
+                      <div className="flex items-center justify-between mb-1.5">
+                        <span className="text-sm font-semibold text-ink">{c.name}</span>
+                        <span className="text-xs text-muted tabular-nums">
+                          {c.students} siswa •{" "}
+                          <b className={c.pct < 34 ? "text-amber-700" : "text-ink"}>{c.pct}%</b>
+                        </span>
                       </div>
-                    ))}
-                  </div>
-                  <Pagination
-                    page={kelasPg.page}
-                    totalPages={kelasPg.totalPages}
-                    total={kelasPg.total}
-                    pageSize={kelasPg.pageSize}
-                    onChange={kelasPg.setPage}
-                  />
-                </>
+                      <div className="h-2 bg-surface rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-700 bg-gradient-to-r ${
+                            c.pct < 34 ? "from-amber-300 to-amber-500" : "from-primary-400 to-primary-700"
+                          }`}
+                          style={{ width: `${Math.max(c.pct, 2)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </Panel>
 
             <Panel
               icon={Activity}
               title="Aktivitas Terbaru"
-              subtitle="Hasil asesmen yang baru masuk"
+              subtitle={tingkatFilter ? `Hasil asesmen terbaru • ${tingkatLabel}` : "Hasil asesmen yang baru masuk"}
               delay={540}
             >
               {terbaru.length === 0 ? (
                 <EmptyState icon={Activity} text="Belum ada hasil asesmen yang masuk." />
               ) : (
-                <>
-                  <div>
-                    {terbaruPg.pageItems.map((r, i) => (
-                      <Link
-                        key={r.id}
-                        href={`/admin/students/${r.student_id}`}
-                        className={rowCls}
-                        style={{ animationDelay: `${i * 45}ms` }}
-                      >
-                        <Avatar name={r.profiles?.full_name} size={34} />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm text-ink truncate">
-                            <b>{r.profiles?.full_name ?? "-"}</b>{" "}
-                            <span className="text-muted">menyelesaikan</span>{" "}
-                            {r.assessments?.title ?? "asesmen"}
-                          </p>
-                          <p className="text-xs text-muted truncate">
-                            {r.profiles?.class_name ?? "Tanpa kelas"}
-                            {r.category ? ` • ${r.category}` : ""}
-                          </p>
-                        </div>
-                        <span className="text-[11px] text-muted shrink-0 bg-surface px-2.5 py-1 rounded-full">
-                          {timeAgo(r.created_at)}
-                        </span>
-                      </Link>
-                    ))}
-                  </div>
-                  <Pagination
-                    page={terbaruPg.page}
-                    totalPages={terbaruPg.totalPages}
-                    total={terbaruPg.total}
-                    pageSize={terbaruPg.pageSize}
-                    onChange={terbaruPg.setPage}
-                  />
-                </>
+                <div>
+                  {terbaru.map((r, i) => (
+                    <Link
+                      key={r.id}
+                      href={`/admin/students/${r.student_id}`}
+                      className={rowCls}
+                      style={{ animationDelay: `${600 + i * 45}ms` }}
+                    >
+                      <Avatar name={r.profiles?.full_name} size={34} />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm text-ink truncate">
+                          <b>{r.profiles?.full_name ?? "-"}</b>{" "}
+                          <span className="text-muted">menyelesaikan</span>{" "}
+                          {r.assessments?.title ?? "asesmen"}
+                        </p>
+                        <p className="text-xs text-muted truncate">
+                          {r.profiles?.class_name ?? "Tanpa kelas"}
+                          {r.category ? ` • ${r.category}` : ""}
+                        </p>
+                      </div>
+                      <span className="text-[11px] text-muted shrink-0 bg-surface px-2.5 py-1 rounded-full">
+                        {timeAgo(r.created_at)}
+                      </span>
+                    </Link>
+                  ))}
+                </div>
               )}
             </Panel>
           </div>

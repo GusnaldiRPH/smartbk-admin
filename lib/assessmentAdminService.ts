@@ -276,3 +276,29 @@ export async function fetchFormAnswers(
     answer: toAnswerList(byQuestion.get(q.id)),
   }));
 }
+
+/* ================= Tingkat siswa (untuk Dashboard & Hasil) ================= */
+
+/**
+ * Peta user_id siswa (= profiles.id) -> tingkat kelas aktif (10/11/12).
+ * Siswa yang belum punya kelas aktif tidak ada di peta ini.
+ */
+export async function fetchStudentTingkatMap(): Promise<Map<string, number>> {
+  const [sRes, kRes] = await Promise.all([
+    supabase.from("siswa").select("id, user_id"),
+    supabase.from("kelas_siswa_aktif").select("siswa_id, tingkat"),
+  ]);
+  if (sRes.error) throw sRes.error;
+  if (kRes.error) throw kRes.error;
+
+  const tingkatBySiswa = new Map<string, number>(
+    (kRes.data ?? []).map((k: any): [string, number] => [k.siswa_id, k.tingkat])
+  );
+
+  const out = new Map<string, number>();
+  (sRes.data ?? []).forEach((s: any) => {
+    const t = tingkatBySiswa.get(s.id);
+    if (s.user_id && t != null) out.set(s.user_id, t);
+  });
+  return out;
+}

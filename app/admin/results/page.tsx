@@ -9,6 +9,11 @@ import {
   fetchAllResults,
   fetchAllStudents,
 } from "@/lib/assessmentService";
+import {
+  fetchAssessmentsWithTingkat,
+  fetchStudentTingkatMap,
+  type AssessmentAdmin,
+} from "@/lib/assessmentAdminService";
 import { Assessment } from "@/types";
 import {
   Avatar,
@@ -23,6 +28,12 @@ import {
 
 const DIMENSION_BASED = ["study_plan", "learning_style", "disc", "rmib"];
 const CHART_COLORS = ["#0a7d4e", "#14b8a6", "#84cc16", "#047857", "#f59e0b", "#0d9488", "#65a30d"];
+
+const TINGKAT_OPTIONS = [
+  { value: 10, label: "Kelas X" },
+  { value: 11, label: "Kelas XI" },
+  { value: 12, label: "Kelas XII" },
+];
 
 type SortKey = "student" | "assessment" | "result" | "date";
 type SortDir = "asc" | "desc";
@@ -56,9 +67,12 @@ export default function AssessmentResultsPage() {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("");
   const [classFilter, setClassFilter] = useState<string>("");
+  const [tingkatFilter, setTingkatFilter] = useState<number>(0); // 0 = semua tingkat
 
-  const [totalStudents, setTotalStudents] = useState(0);
-  const [classStudentCounts, setClassStudentCounts] = useState<Map<string, number>>(new Map());
+  // data pendukung untuk perhitungan per tingkat
+  const [students, setStudents] = useState<any[]>([]);
+  const [scopes, setScopes] = useState<AssessmentAdmin[]>([]);
+  const [tingkatMap, setTingkatMap] = useState<Map<string, number>>(new Map());
 
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -66,14 +80,13 @@ export default function AssessmentResultsPage() {
 
   useEffect(() => {
     fetchAssessmentsForAdmin().then(setAssessments);
-    fetchAllStudents().then((students: any[]) => {
-      setTotalStudents(students.length);
-      const map = new Map<string, number>();
-      students.forEach((s) => {
-        if (s.class_name) map.set(s.class_name, (map.get(s.class_name) ?? 0) + 1);
-      });
-      setClassStudentCounts(map);
-    });
+    fetchAllStudents().then(setStudents);
+    fetchAssessmentsWithTingkat()
+      .then(setScopes)
+      .catch(() => {});
+    fetchStudentTingkatMap()
+      .then(setTingkatMap)
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -96,25 +109,32 @@ export default function AssessmentResultsPage() {
     setPage(1);
   };
 
+  // Hasil yang sesuai filter tingkat (tingkat = kelas aktif siswa saat ini)
+  const byTingkat = useMemo(
+    () =>
+      tingkatFilter ? results.filter((r) => tingkatMap.get(r.student_id) === tingkatFilter) : results,
+    [results, tingkatFilter, tingkatMap]
+  );
+
   const categoryOptions = useMemo(() => {
     const set = new Set<string>();
-    results.forEach((r) => {
+    byTingkat.forEach((r) => {
       if (r.category) set.add(r.category);
     });
     return Array.from(set).sort();
-  }, [results]);
+  }, [byTingkat]);
 
   const classOptions = useMemo(() => {
     const set = new Set<string>();
-    results.forEach((r) => {
+    byTingkat.forEach((r) => {
       if (r.profiles?.class_name) set.add(r.profiles.class_name);
     });
     return Array.from(set).sort();
-  }, [results]);
+  }, [byTingkat]);
 
   const filtered = useMemo(
     () =>
-      results.filter((r) => {
+      byTingkat.filter((r) => {
         const matchesSearch = `${r.profiles?.full_name ?? ""} ${r.profiles?.class_name ?? ""}`
           .toLowerCase()
           .includes(search.toLowerCase());
@@ -122,7 +142,7 @@ export default function AssessmentResultsPage() {
         const matchesClass = !classFilter || r.profiles?.class_name === classFilter;
         return matchesSearch && matchesCategory && matchesClass;
       }),
-    [results, search, categoryFilter, classFilter]
+    [byTingkat, search, categoryFilter, classFilter]
   );
 
   const isAllAssessments = !assessmentId;
@@ -134,30 +154,46 @@ export default function AssessmentResultsPage() {
     [isAllAssessments, filtered]
   );
 
-  // Persentase pengisian per asesmen (jumlah siswa unik yang sudah mengisi,
-  // dibagi total siswa yang relevan — total keseluruhan atau total 1 kelas
-  // kalau filter Kelas sedang aktif). Hanya relevan saat "Semua Asesmen".
+  // Persentase pengisian per asesmen: siswa yang sudah mengisi dibagi siswa yang
+  // WAJIB mengisi, yaitu siswa dengan tingkat kelas yang termasuk dalam tingkat
+  // asesmen itu (dan sesuai filter tingkat / kelas yang sedang aktif).
   const completionData = useMemo(() => {
     if (!isAllAssessments) return [];
-    const denom = classFilter ? classStudentCounts.get(classFilter) ?? 0 : totalStudents;
-    if (denom === 0) return [];
-    return assessments
+
+    const pool = students.filter((s) => {
+      const t = tingkatMap.get(s.id);
+      if (t == null) return false;
+      if (tingkatFilter && t !== tingkatFilter) return false;
+      if (classFilter && s.class_name !== classFilter) return false;
+      return true;
+    });
+
+    return scopes
       .map((a) => {
-        const studentIds = new Set(
-          filtered.filter((r) => r.assessment_id === a.id).map((r) => r.student_id)
+        const eligibleIds = new Set(
+          pool.filter((s) => a.tingkat.includes(tingkatMap.get(s.id) as number)).map((s) => s.id)
         );
+        const doneIds = new Set(
+          results
+            .filter((r) => r.assessment_id === a.id && eligibleIds.has(r.student_id))
+            .map((r) => r.student_id)
+        );
+        const denom = eligibleIds.size;
         return {
           title: a.title,
-          count: studentIds.size,
+          active: a.is_active,
+          count: doneIds.size,
           denom,
-          pct: Math.round((studentIds.size / denom) * 100),
+          pct: denom ? Math.round((doneIds.size / denom) * 100) : 0,
         };
       })
+      .filter((c) => c.denom > 0 && (c.active || c.count > 0))
       .sort((a, b) => b.pct - a.pct);
-  }, [isAllAssessments, assessments, filtered, classFilter, classStudentCounts, totalStudents]);
+  }, [isAllAssessments, scopes, students, results, tingkatMap, tingkatFilter, classFilter]);
 
   const chartSubtitle = [
     isAllAssessments ? "Semua Asesmen" : assessments.find((a) => a.id === assessmentId)?.title,
+    tingkatFilter ? TINGKAT_OPTIONS.find((o) => o.value === tingkatFilter)?.label : "Semua Tingkat",
     classFilter || "Semua Kelas",
     categoryFilter ? `Hasil: ${categoryFilter}` : null,
   ]
@@ -203,12 +239,12 @@ export default function AssessmentResultsPage() {
       <PageHeader
         icon={FileBarChart}
         title="Hasil Asesmen"
-        subtitle="Lihat dan filter hasil asesmen semua siswa, per asesmen dan per hasil."
+        subtitle="Lihat dan filter hasil asesmen semua siswa, per asesmen, tingkat, dan hasil."
       />
 
       {/* Filter */}
       <div
-        className="bg-white border border-primary-100 rounded-2xl p-4 mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 animate-fadeUp"
+        className="bg-white border border-primary-100 rounded-2xl p-4 mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5 animate-fadeUp"
         style={{ animationDelay: "80ms" }}
       >
         <div>
@@ -222,6 +258,27 @@ export default function AssessmentResultsPage() {
             {assessments.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.title}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <label className={labelCls}>Tingkat</label>
+          <select
+            value={tingkatFilter}
+            onChange={(e) => {
+              setTingkatFilter(Number(e.target.value));
+              setClassFilter("");
+              setCategoryFilter("");
+              setPage(1);
+            }}
+            className={controlCls}
+          >
+            <option value={0}>Semua Tingkat</option>
+            {TINGKAT_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
               </option>
             ))}
           </select>
@@ -428,7 +485,10 @@ export default function AssessmentResultsPage() {
           {/* Persentase pengisian per asesmen — cuma relevan saat "Semua Asesmen". */}
           {isAllAssessments && !loading && completionData.length > 0 && (
             <div className="mt-5 pt-5 border-t border-primary-50">
-              <h3 className="font-bold text-ink text-sm mb-3">Persentase Pengisian</h3>
+              <h3 className="font-bold text-ink text-sm mb-1">Persentase Pengisian</h3>
+              <p className="text-muted text-[11px] mb-3 leading-relaxed">
+                Dihitung dari siswa yang tingkatnya termasuk dalam asesmen tersebut.
+              </p>
               <div className="flex flex-col gap-3">
                 {completionData.map((c) => (
                   <div key={c.title}>
