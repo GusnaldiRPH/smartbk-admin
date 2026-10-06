@@ -9,6 +9,7 @@ import {
   ListChecks,
   Users,
   FileBarChart,
+  ClipboardList,
   LogOut,
   Menu,
   X,
@@ -17,6 +18,7 @@ import { useAdminAuth } from "@/lib/useAdminAuth";
 
 const NAV_ITEMS = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/admin/assessments", label: "Kelola Asesmen", icon: ClipboardList },
   { href: "/admin/questions", label: "Kelola Soal", icon: ListChecks },
   { href: "/admin/results", label: "Hasil Asesmen", icon: FileBarChart },
   { href: "/admin/students", label: "Kelola Siswa", icon: Users },
