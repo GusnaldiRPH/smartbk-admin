@@ -226,3 +226,53 @@ export async function swapQuestionOrder(
   await step(b.id, a.order);
   await step(a.id, b.order);
 }
+
+/* ================= Jawaban Form (dilihat guru) ================= */
+
+export interface FormAnswerItem {
+  question_id: string;
+  question_text: string;
+  input_type: FormInputType;
+  answer: string[];
+}
+
+// Bentuk jawaban di student_answers.selected_option:
+//   isian -> { text }, pilihan tunggal -> { label, value }, pilihan ganda -> { labels }
+function toAnswerList(sel: any): string[] {
+  if (!sel) return [];
+  if (Array.isArray(sel.labels)) return sel.labels.map(String).filter(Boolean);
+  if (typeof sel.text === "string") return sel.text.trim() ? [sel.text.trim()] : [];
+  if (typeof sel.label === "string") return sel.label ? [sel.label] : [];
+  return [];
+}
+
+export async function fetchFormAnswers(
+  studentId: string,
+  assessmentId: string
+): Promise<FormAnswerItem[]> {
+  const [qRes, aRes] = await Promise.all([
+    supabase
+      .from("questions")
+      .select("id, question_text, question_order, scoring_rules")
+      .eq("assessment_id", assessmentId)
+      .order("question_order", { ascending: true }),
+    supabase
+      .from("student_answers")
+      .select("question_id, selected_option")
+      .eq("student_id", studentId)
+      .eq("assessment_id", assessmentId),
+  ]);
+  if (qRes.error) throw qRes.error;
+  if (aRes.error) throw aRes.error;
+
+  const byQuestion = new Map<string, any>(
+    (aRes.data ?? []).map((a: any): [string, any] => [a.question_id, a.selected_option])
+  );
+
+  return (qRes.data ?? []).map((q: any) => ({
+    question_id: q.id,
+    question_text: q.question_text ?? "",
+    input_type: (q.scoring_rules?.input_type ?? "single") as FormInputType,
+    answer: toAnswerList(byQuestion.get(q.id)),
+  }));
+}

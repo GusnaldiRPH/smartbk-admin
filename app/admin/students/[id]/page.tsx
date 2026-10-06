@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { fetchStudentById, fetchResultsForStudent } from "@/lib/assessmentService";
 import { Avatar, EmptyState } from "@/components/ui";
+import FormAnswers from "@/components/FormAnswers";
 
 const DIMENSION_BASED = ["study_plan", "learning_style", "disc", "rmib"];
 const LOWER_IS_BETTER = ["rmib"];
@@ -358,6 +359,8 @@ export default function StudentDetailPage({ params }: { params: { id: string } }
                       })}
                     </div>
                   </>
+                ) : assessmentType === "form" ? (
+                  <FormAnswers studentId={params.id} assessmentId={r.assessment_id} />
                 ) : (
                   <p className="text-sm text-ink">
                     Skor: <span className="font-bold">{r.total_score}</span>/{r.max_score} —{" "}

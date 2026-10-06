@@ -337,7 +337,7 @@ export default function AssessmentResultsPage() {
                             <span className="inline-block bg-primary-50 text-primary-800 text-xs font-semibold px-2.5 py-1 rounded-full">
                               {isDimensionBased ? r.category : `${r.category ?? "-"}`}
                             </span>
-                            {!isDimensionBased && (
+                            {!isDimensionBased && r.total_score != null && (
                               <span className="text-xs text-muted ml-2 tabular-nums">
                                 {r.total_score}/{r.max_score ?? "-"}
                               </span>

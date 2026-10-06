@@ -74,7 +74,9 @@ export default function ManageQuestionsPage() {
   const [page, setPage] = useState(1);
 
   useEffect(() => {
-    fetchAssessmentsForAdmin().then((data) => {
+    fetchAssessmentsForAdmin().then((all) => {
+      // form disusun lewat Kelola Asesmen > Susun Form, bukan lewat halaman ini
+      const data = all.filter((a) => a.assessment_type !== "form");
       setAssessments(data);
       if (data.length > 0) setAssessmentId(data[0].id);
       else setLoading(false);

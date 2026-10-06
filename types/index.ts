@@ -22,11 +22,12 @@ export interface Service {
 }
 
 export type AssessmentType =
+  | "scale"
   | "study_plan"
   | "learning_style"
-  | "stress_scale"
   | "disc"
-  | "rmib";
+  | "rmib"
+  | "form";
 
 export interface Assessment {
   id: string;
