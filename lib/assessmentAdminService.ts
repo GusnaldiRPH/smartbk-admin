@@ -302,3 +302,8 @@ export async function fetchStudentTingkatMap(): Promise<Map<string, number>> {
   });
   return out;
 }
+/** Hapus asesmen beserta soal, hasil, dan jawaban siswa (lewat fungsi database delete_assessment). */
+export async function deleteAssessment(id: string) {
+  const { error } = await supabase.rpc("delete_assessment", { p_id: id });
+  if (error) throw error;
+}

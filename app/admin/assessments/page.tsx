@@ -3,9 +3,20 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ClipboardList, Clock, FileText, Loader2, Pencil, Plus, X } from "lucide-react";
+import {
+  AlertTriangle,
+  ClipboardList,
+  Clock,
+  FileText,
+  Loader2,
+  Pencil,
+  Plus,
+  Trash2,
+  X,
+} from "lucide-react";
 import {
   TINGKAT_LIST,
+  deleteAssessment,
   fetchAssessmentsWithTingkat,
   fetchServiceOptions,
   saveAssessment,
@@ -15,14 +26,37 @@ import {
 } from "@/lib/assessmentAdminService";
 import { EmptyState, PageHeader, controlCls, labelCls } from "@/components/ui";
 
-const TYPE_LABELS: Record<string, string> = {
-  form: "Form / Angket",
-  study_plan: "Perencanaan Studi Lanjut",
-  learning_style: "Gaya Belajar",
-  disc: "Kepribadian DISC",
-  rmib: "Minat RMIB",
-  stress_scale: "Skala Stres Akademik",
+// Nilai yang tersimpan di database (key) TIDAK diubah, karena aplikasi memakainya
+// untuk menghitung hasil. Yang berubah hanya label dan keterangannya untuk guru.
+const TYPE_INFO: Record<string, { label: string; hint: string }> = {
+  form: {
+    label: "Form / Angket",
+    hint: "Pertanyaan disusun sendiri lewat tombol Susun Form (isian, pilihan tunggal, atau pilihan ganda). Tanpa skor atau kategori; jawaban siswa ditampilkan apa adanya.",
+  },
+  stress_scale: {
+    label: "Likert · Skala Stres",
+    hint: "Jawaban berupa skala (misalnya sangat setuju sampai sangat tidak setuju), dijumlah jadi satu skor total lalu dikategorikan Rendah, Sedang, atau Tinggi.",
+  },
+  learning_style: {
+    label: "Dimensi · Gaya Belajar",
+    hint: "Skor dihitung per dimensi gaya belajar. Hasilnya gaya yang paling menonjol beserta rincian skor tiap gaya.",
+  },
+  disc: {
+    label: "Dimensi · Kepribadian DISC",
+    hint: "Skor dihitung per dimensi kepribadian (D, I, S, C). Hasilnya tipe yang paling dominan beserta rincian skornya.",
+  },
+  study_plan: {
+    label: "Dimensi · Studi Lanjut",
+    hint: "Skor dihitung per bidang (RIASEC). Hasilnya bidang studi atau karier yang paling diminati.",
+  },
+  rmib: {
+    label: "Ranking · Minat RMIB",
+    hint: "Siswa mengurutkan pilihan, lalu diperingkat per bidang minat kerja. Peringkat lebih kecil berarti lebih diminati.",
+  },
 };
+const TYPE_ORDER = ["form", "stress_scale", "learning_style", "disc", "study_plan", "rmib"];
+const typeLabel = (t: string) => TYPE_INFO[t]?.label ?? t;
+
 const ROMAWI: Record<number, string> = { 10: "X", 11: "XI", 12: "XII" };
 
 function Switch({
@@ -118,8 +152,8 @@ function AssessmentModal({
   };
 
   return (
-    <div className="fixed inset-0">
-      <div className="bg-white rounded-2xl w-full max-w-2xl p-6">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 shadow-2xl animate-popIn">
         <div className="flex items-start justify-between mb-5">
           <div>
             <h2 className="text-lg font-extrabold text-ink tracking-tight">
@@ -157,25 +191,23 @@ function AssessmentModal({
 
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
-              <label className={labelCls}>Tipe</label>
+              <label className={labelCls}>Tipe Penilaian</label>
               <select
                 value={type}
                 onChange={(e) => setType(e.target.value)}
                 disabled={isEdit}
                 className={controlCls}
               >
-                {Object.entries(TYPE_LABELS).map(([value, label]) => (
+                {TYPE_ORDER.map((value) => (
                   <option key={value} value={value}>
-                    {label}
+                    {typeLabel(value)}
                   </option>
                 ))}
               </select>
               <p className="text-xs text-muted mt-1.5 leading-relaxed">
-                {isEdit
-                  ? "Tipe tidak bisa diubah setelah dibuat."
-                  : type === "form"
-                  ? "Pertanyaan disusun sendiri lewat tombol Susun Form. Tanpa skor atau kategori; jawaban siswa ditampilkan apa adanya."
-                  : "Tipe ini memakai perhitungan hasil bawaan. Dimensi dan soalnya diatur lewat Kelola Soal."}
+                {isEdit ? "Tipe tidak bisa diubah setelah dibuat. " : ""}
+                {TYPE_INFO[type]?.hint}
+                {!isEdit && type !== "form" && " Dimensi dan soalnya diatur lewat Kelola Soal."}
               </p>
             </div>
 
@@ -215,7 +247,8 @@ function AssessmentModal({
                 ))}
               </select>
               <p className="text-xs text-muted mt-1.5 leading-relaxed">
-                Menentukan di daftar layanan mana asesmen ini muncul di aplikasi.
+                Bidang bimbingan (Belajar, Karier, Pribadi, atau Sosial) tempat asesmen ini dikelompokkan di
+                aplikasi siswa.
               </p>
             </div>
             <div>
@@ -292,6 +325,75 @@ function AssessmentModal({
   );
 }
 
+/* ---------- Modal konfirmasi hapus ---------- */
+
+function DeleteModal({
+  item,
+  onClose,
+  onDeleted,
+}: {
+  item: AssessmentAdmin;
+  onClose: () => void;
+  onDeleted: () => void;
+}) {
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    setError(null);
+    try {
+      await deleteAssessment(item.id);
+      onDeleted();
+      onClose();
+    } catch (e: any) {
+      setError(e?.message ?? "Gagal menghapus asesmen.");
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl animate-popIn">
+        <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center mb-4">
+          <AlertTriangle size={22} className="text-red-600" />
+        </div>
+        <h2 className="text-lg font-extrabold text-ink tracking-tight">Hapus asesmen ini?</h2>
+        <p className="text-sm text-ink font-semibold mt-1">{item.title}</p>
+        <p className="text-sm text-muted mt-2 leading-relaxed">
+          Semua soal dan <b className="text-ink">seluruh hasil serta jawaban siswa</b> untuk asesmen ini ikut
+          terhapus permanen dan tidak bisa dikembalikan. Kalau hanya ingin menyembunyikannya dari siswa, cukup
+          matikan tombol Aktif.
+        </p>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-xl px-3.5 py-2.5 text-sm text-red-700 mt-4">
+            {error}
+          </div>
+        )}
+
+        <div className="flex gap-3 mt-6">
+          <button
+            onClick={onClose}
+            disabled={deleting}
+            className="flex-1 bg-white border border-primary-100 hover:bg-surface disabled:opacity-60 text-ink text-sm font-semibold py-3 rounded-xl transition-colors"
+          >
+            Batal
+          </button>
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            className="flex-1 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 disabled:opacity-60 text-white text-sm font-semibold py-3 rounded-xl transition-colors"
+          >
+            {deleting && <Loader2 size={16} className="animate-spin" />}
+            Ya, Hapus
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- Halaman ---------- */
 
 export default function ManageAssessmentsPage() {
@@ -300,6 +402,7 @@ export default function ManageAssessmentsPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [modal, setModal] = useState<"new" | AssessmentAdmin | null>(null);
+  const [toDelete, setToDelete] = useState<AssessmentAdmin | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const load = () => {
@@ -387,7 +490,7 @@ export default function ManageAssessmentsPage() {
                 <h3 className="font-bold text-ink leading-snug">{a.title}</h3>
                 <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                   <span className="bg-primary-50 text-primary-800 text-[11px] font-semibold px-2.5 py-0.5 rounded-full">
-                    {TYPE_LABELS[a.assessment_type] ?? a.assessment_type}
+                    {typeLabel(a.assessment_type)}
                   </span>
                   {serviceName(a.service_id) && (
                     <span className="bg-surface text-muted text-[11px] font-semibold px-2.5 py-0.5 rounded-full">
@@ -457,6 +560,14 @@ export default function ManageAssessmentsPage() {
                     <Pencil size={14} />
                     Edit
                   </button>
+                  <button
+                    onClick={() => setToDelete(a)}
+                    aria-label={`Hapus ${a.title}`}
+                    title="Hapus asesmen"
+                    className="flex items-center justify-center text-red-600 bg-red-50 hover:bg-red-100 w-9 h-9 rounded-lg transition-colors"
+                  >
+                    <Trash2 size={15} />
+                  </button>
                 </div>
               </div>
             </div>
@@ -471,6 +582,10 @@ export default function ManageAssessmentsPage() {
           onClose={() => setModal(null)}
           onSaved={load}
         />
+      )}
+
+      {toDelete && (
+        <DeleteModal item={toDelete} onClose={() => setToDelete(null)} onDeleted={load} />
       )}
     </div>
   );
