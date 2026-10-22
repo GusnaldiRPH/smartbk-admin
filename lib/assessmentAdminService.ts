@@ -279,29 +279,45 @@ export async function fetchFormAnswers(
 
 /* ================= Tingkat siswa (untuk Dashboard & Hasil) ================= */
 
+/** Baca semua baris dengan paginasi 1000 (Supabase membatasi 1000 baris per query). */
+async function fetchAllRows<T>(build: () => any): Promise<T[]> {
+  const PAGE = 1000;
+  const all: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await build().range(from, from + PAGE - 1);
+    if (error) throw error;
+    all.push(...((data ?? []) as T[]));
+    if (!data || data.length < PAGE) break;
+  }
+  return all;
+}
+
 /**
  * Peta user_id siswa (= profiles.id) -> tingkat kelas aktif (10/11/12).
  * Siswa yang belum punya kelas aktif tidak ada di peta ini.
  */
 export async function fetchStudentTingkatMap(): Promise<Map<string, number>> {
-  const [sRes, kRes] = await Promise.all([
-    supabase.from("siswa").select("id, user_id"),
-    supabase.from("kelas_siswa_aktif").select("siswa_id, tingkat"),
+  const [siswaRows, kelasRows] = await Promise.all([
+    fetchAllRows<{ id: string; user_id: string | null }>(() =>
+      supabase.from("siswa").select("id, user_id").order("id")
+    ),
+    fetchAllRows<{ siswa_id: string; tingkat: number }>(() =>
+      supabase.from("kelas_siswa_aktif").select("siswa_id, tingkat").order("siswa_id")
+    ),
   ]);
-  if (sRes.error) throw sRes.error;
-  if (kRes.error) throw kRes.error;
 
   const tingkatBySiswa = new Map<string, number>(
-    (kRes.data ?? []).map((k: any): [string, number] => [k.siswa_id, k.tingkat])
+    kelasRows.map((k): [string, number] => [k.siswa_id, k.tingkat])
   );
 
   const out = new Map<string, number>();
-  (sRes.data ?? []).forEach((s: any) => {
+  siswaRows.forEach((s) => {
     const t = tingkatBySiswa.get(s.id);
     if (s.user_id && t != null) out.set(s.user_id, t);
   });
   return out;
 }
+
 /** Hapus asesmen beserta soal, hasil, dan jawaban siswa (lewat fungsi database delete_assessment). */
 export async function deleteAssessment(id: string) {
   const { error } = await supabase.rpc("delete_assessment", { p_id: id });
