@@ -138,32 +138,55 @@ export async function deleteDimension(id: string) {
   if (error) throw error;
 }
 
+/**
+ * Supabase membatasi 1 query maksimal 1000 baris. Helper ini mengambil semua baris
+ * dengan membaca per halaman 1000 sampai habis.
+ * Urutkan dengan kolom unik (mis. id) supaya halaman tidak saling tumpang tindih.
+ */
+async function fetchAllRows<T>(
+  build: () => any // fungsi yang mengembalikan query Supabase baru (belum di-await)
+): Promise<T[]> {
+  const PAGE = 1000;
+  const all: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await build().range(from, from + PAGE - 1);
+    if (error) throw error;
+    all.push(...((data ?? []) as T[]));
+    if (!data || data.length < PAGE) break;
+  }
+  return all;
+}
+
 /** Semua siswa (role = "siswa"), dengan kelas dari riwayat_kelas (bukan dari profiles.class_name yang bisa basi). */
 export async function fetchAllStudents() {
-  const { data: profiles, error } = await supabase
-    .from("profiles")
-    .select("id, full_name, email, class_name, nis")
-    .eq("role", "siswa")
-    .order("full_name");
-  if (error) throw error;
-
-  const { data: siswaRows } = await supabase.from("siswa").select("id, user_id, nis");
-  const { data: kelasRows } = await supabase.from("kelas_siswa_aktif").select("siswa_id, kelas_nama");
-
-  const kelasBySiswaId = new Map<string, string>(
-    (kelasRows ?? []).map((k: { siswa_id: string; kelas_nama: string }) => [k.siswa_id, k.kelas_nama])
+  const profiles = await fetchAllRows<{
+    id: string; full_name: string; email: string; class_name: string | null; nis: string | null;
+  }>(() =>
+    supabase
+      .from("profiles")
+      .select("id, full_name, email, class_name, nis")
+      .eq("role", "siswa")
+      .order("full_name")
+      .order("id")
   );
+
+  const siswaRows = await fetchAllRows<{ id: string; user_id: string; nis: string }>(() =>
+    supabase.from("siswa").select("id, user_id, nis").order("id")
+  );
+  const kelasRows = await fetchAllRows<{ siswa_id: string; kelas_nama: string }>(() =>
+    supabase.from("kelas_siswa_aktif").select("siswa_id, kelas_nama").order("siswa_id")
+  );
+
+  const kelasBySiswaId = new Map<string, string>(kelasRows.map((k) => [k.siswa_id, k.kelas_nama]));
   const siswaByUserId = new Map<string, { id: string; user_id: string; nis: string }>(
-    (siswaRows ?? []).map((s: { id: string; user_id: string; nis: string }) => [s.user_id, s])
+    siswaRows.map((s) => [s.user_id, s])
   );
 
-  return (profiles ?? []).map(
-    (p: { id: string; full_name: string; email: string; class_name: string | null; nis: string | null }) => {
-      const siswa = siswaByUserId.get(p.id);
-      const kelasNama = siswa ? kelasBySiswaId.get(siswa.id) : undefined;
-      return { ...p, class_name: kelasNama ?? p.class_name, nis: siswa?.nis ?? p.nis };
-    }
-  );
+  return profiles.map((p) => {
+    const siswa = siswaByUserId.get(p.id);
+    const kelasNama = siswa ? kelasBySiswaId.get(siswa.id) : undefined;
+    return { ...p, class_name: kelasNama ?? p.class_name, nis: siswa?.nis ?? p.nis };
+  });
 }
 
 export async function fetchStudentById(id: string) {
@@ -299,11 +322,13 @@ export type RosterItem = {
 
 /** Semua siswa yang aktif di tahun ajaran yang sedang aktif, siap dipindahkan. */
 export async function fetchRosterAktif(): Promise<RosterItem[]> {
-  const { data, error } = await supabase
-    .from("kelas_siswa_aktif")
-    .select("siswa_id, riwayat_kelas_id, tingkat, kelas_nama, siswa:siswa_id(nis, nama, user_id)");
-  if (error) throw error;
-  return (data as any[]).map((r) => ({
+  const data = await fetchAllRows<any>(() =>
+    supabase
+      .from("kelas_siswa_aktif")
+      .select("siswa_id, riwayat_kelas_id, tingkat, kelas_nama, siswa:siswa_id(nis, nama, user_id)")
+      .order("riwayat_kelas_id")
+  );
+  return data.map((r) => ({
     siswa_id: r.siswa_id,
     riwayat_kelas_id: r.riwayat_kelas_id,
     tingkat: r.tingkat,
