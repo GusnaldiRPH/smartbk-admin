@@ -1,15 +1,11 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import * as XLSX from "xlsx";
 import {
   Loader2,
-  Upload,
-  Download,
   CheckCircle2,
   ArrowRight,
   ArrowUpCircle,
-  FileSpreadsheet,
   AlertTriangle,
   GraduationCap,
   UserCheck,
@@ -22,8 +18,8 @@ import {
 } from "@/lib/assessmentService";
 import { parseKelas, ensureKelasId } from "@/lib/kelasClientHelper";
 import { PageHeader, controlCls } from "@/components/ui";
+import PilihManualPanel, { type HasilManual } from "./PilihManualPanel";
 
-type BarisExcel = { nis: string; kelasBaru: string };
 type BarisSiap = {
   roster: RosterItem;
   kelasBaru: ReturnType<typeof parseKelas>;
@@ -78,7 +74,6 @@ export default function NaikKelasPage() {
   const [errorRows, setErrorRows] = useState<BarisError[]>([]);
   const [belumDitempatkan, setBelumDitempatkan] = useState<RosterItem[]>([]);
   const [otomatisLulus, setOtomatisLulus] = useState<RosterItem[]>([]);
-  const [fileName, setFileName] = useState("");
 
   const [menerapkan, setMenerapkan] = useState(false);
   const [selesai, setSelesai] = useState(false);
@@ -112,65 +107,12 @@ export default function NaikKelasPage() {
     }
   };
 
-  const handleDownloadTemplate = () => {
-    const ws = XLSX.utils.json_to_sheet([{ NIS: "12345", "Kelas Baru": "XI RPL 2" }]);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Naik Kelas");
-    XLSX.writeFile(wb, "template-naik-kelas.xlsx");
-  };
-
-  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !tahunTarget) return;
-    setFileName(file.name);
-
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      const wb = XLSX.read(evt.target?.result, { type: "binary" });
-      const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
-
-      const parsed: BarisExcel[] = rows.map((row) => {
-        const norm: Record<string, any> = {};
-        Object.keys(row).forEach((k) => (norm[k.trim().toLowerCase()] = row[k]));
-        return {
-          nis: String(norm["nis"] ?? "").trim(),
-          kelasBaru: String(norm["kelas baru"] ?? norm["kelas"] ?? "").trim(),
-        };
-      });
-
-      const rosterByNis = new Map(roster.map((r) => [r.nis, r]));
-      const nisDiExcel = new Set<string>();
-      const okRows: BarisSiap[] = [];
-      const badRows: BarisError[] = [];
-
-      parsed.forEach((row) => {
-        if (!row.nis) return;
-        nisDiExcel.add(row.nis);
-        const r = rosterByNis.get(row.nis);
-        if (!r) {
-          badRows.push({ ...row, pesan: "NIS tidak ditemukan di kelas aktif tahun ini." });
-          return;
-        }
-        const kb = parseKelas(row.kelasBaru);
-        if (!kb) {
-          badRows.push({ ...row, pesan: `Format kelas "${row.kelasBaru}" salah (contoh: XI RPL 2).` });
-          return;
-        }
-        if (kb.tingkat < r.tingkat) {
-          badRows.push({ ...row, pesan: `Tingkat tidak boleh turun (sekarang tingkat ${r.tingkat}).` });
-          return;
-        }
-        okRows.push({ roster: r, kelasBaru: kb, hasil: kb.tingkat > r.tingkat ? "naik" : "tinggal_kelas" });
-      });
-
-      const sisaRoster = roster.filter((r) => !nisDiExcel.has(r.nis));
-      setOtomatisLulus(sisaRoster.filter((r) => r.tingkat === 12));
-      setBelumDitempatkan(sisaRoster.filter((r) => r.tingkat !== 12));
-      setSiap(okRows);
-      setErrorRows(badRows);
-      setSelesai(false);
-    };
-    reader.readAsBinaryString(file);
+  const handleLanjutManual = (h: HasilManual) => {
+    setSiap(h.siap);
+    setErrorRows(h.errorRows);
+    setBelumDitempatkan(h.belumDitempatkan);
+    setOtomatisLulus(h.otomatisLulus);
+    setSelesai(false);
   };
 
   const handleTerapkan = async () => {
@@ -217,7 +159,6 @@ export default function NaikKelasPage() {
       setErrorRows([]);
       setBelumDitempatkan([]);
       setOtomatisLulus([]);
-      setFileName("");
       setSelesai(false);
       alert("Tahun ajaran baru sudah aktif.");
     } catch (e: any) {
@@ -299,39 +240,17 @@ export default function NaikKelasPage() {
 
       {tahunTarget && (
         <>
-          {/* Langkah 2: upload excel */}
+          {/* Langkah 2: atur kenaikan kelas */}
           <StepCard
             n={2}
             done={hasPreview}
             title={
               <>
-                Upload daftar kenaikan ke <span className="text-primary-700">{tahunTarget.nama}</span>
+                Atur kenaikan kelas ke <span className="text-primary-700">{tahunTarget.nama}</span>
               </>
             }
-            right={
-              <button
-                onClick={handleDownloadTemplate}
-                className="flex items-center gap-1.5 text-sm font-semibold text-primary-700 hover:text-primary-800 bg-primary-50 hover:bg-primary-100 px-3 py-1.5 rounded-lg transition-colors"
-              >
-                <Download size={14} />
-                Template
-              </button>
-            }
           >
-            <label className="group flex flex-col items-center justify-center gap-2.5 border-2 border-dashed border-primary-200 rounded-2xl py-9 cursor-pointer transition-all hover:border-primary-500 hover:bg-primary-50/60">
-              <div className="w-12 h-12 rounded-2xl bg-primary-50 group-hover:bg-white flex items-center justify-center transition-all group-hover:-translate-y-1 group-hover:shadow-lg group-hover:shadow-primary-700/15">
-                {fileName ? (
-                  <FileSpreadsheet size={22} className="text-primary-600" />
-                ) : (
-                  <Upload size={22} className="text-primary-600" />
-                )}
-              </div>
-              <span className="text-sm text-ink font-semibold">
-                {fileName || "Klik untuk pilih file Excel"}
-              </span>
-              <span className="text-xs text-muted">Kolom: NIS, Kelas Baru (.xlsx, .xls, .csv)</span>
-              <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFile} className="hidden" />
-            </label>
+            <PilihManualPanel roster={roster} onLanjut={handleLanjutManual} />
           </StepCard>
 
           {/* Langkah 3: pratinjau */}
@@ -356,9 +275,7 @@ export default function NaikKelasPage() {
                   <p className="text-sm font-semibold text-red-800 mb-1">Baris bermasalah:</p>
                   <ul className="text-sm text-red-700 list-disc pl-5">
                     {errorRows.map((r, i) => (
-                      <li key={i}>
-                        NIS {r.nis || "-"}: {r.pesan}
-                      </li>
+                      <li key={i}>{r.pesan}</li>
                     ))}
                   </ul>
                 </div>
