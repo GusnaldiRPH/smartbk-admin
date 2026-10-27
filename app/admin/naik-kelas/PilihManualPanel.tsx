@@ -27,7 +27,7 @@ const JURUSAN_NAIK_DARI_X: Record<string, string[]> = {
   PM: ["BR"],
   DKV: ["DKV"],
   AKL: ["AKL"],
-  TJKT: ["TJKT"],
+  TJKT: ["TKJ"],
 };
 
 const ROMAWI: Record<number, string> = { 10: "X", 11: "XI", 12: "XII" };
