@@ -77,6 +77,10 @@ const config: Config = {
           "20%,60%": { transform: "translateX(-6px)" },
           "40%,80%": { transform: "translateX(6px)" },
         },
+        marquee: {
+          from: { transform: "translateX(0)" },
+          to: { transform: "translateX(-50%)" },
+        },
       },
       animation: {
         floatA: "floatA 14s ease-in-out infinite",
@@ -90,6 +94,7 @@ const config: Config = {
         ring: "ring 2.4s ease-out infinite",
         bob: "bob 4s ease-in-out infinite",
         shake: "shake .4s ease-in-out",
+        marquee: "marquee 35s linear infinite",
       },
     },
   },
