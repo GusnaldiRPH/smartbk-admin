@@ -1,11 +1,21 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, Search, CheckCircle2, AlertTriangle } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import * as XLSX from "xlsx";
+import {
+  ArrowRight,
+  Search,
+  CheckCircle2,
+  AlertTriangle,
+  FileUp,
+  GraduationCap,
+  X as XIcon,
+} from "lucide-react";
 import type { RosterItem } from "@/lib/assessmentService";
 import { parseKelas } from "@/lib/kelasClientHelper";
 import { controlCls } from "@/components/ui";
 
+/** Satu siswa yang siap dipindahkan (bentuknya sama dengan BarisSiap di halaman). */
 export type SiapManual = {
   roster: RosterItem;
   kelasBaru: ReturnType<typeof parseKelas>;
@@ -20,7 +30,11 @@ export type HasilManual = {
   otomatisLulus: RosterItem[];
 };
 
-// Aturan jurusan saat naik dari X ke XI. Pilihan > 1 (MPLB) dipilih manual.
+/**
+ * Aturan jurusan saat naik dari kelas X ke XI.
+ * Kalau pilihannya lebih dari satu (mis. MPLB), guru harus memilih per siswa.
+ * Dari XI ke XII jurusan tetap sama.
+ */
 const JURUSAN_NAIK_DARI_X: Record<string, string[]> = {
   PPLG: ["RPL"],
   MPLB: ["MP", "MLOG"],
@@ -33,14 +47,21 @@ const JURUSAN_NAIK_DARI_X: Record<string, string[]> = {
 const ROMAWI: Record<number, string> = { 10: "X", 11: "XI", 12: "XII" };
 
 type Parsed = { tingkat: number; program: string; rombel: number };
-type Draft = { tinggal: boolean; program: string | null; rombel: number; dipilih: boolean };
+type Draft = {
+  tinggal: boolean;
+  program: string | null; // null = belum dipilih
+  rombel: number;
+  dipilih: boolean; // dicentang untuk aksi massal
+};
 
+/** "X PPLG 1" -> { tingkat: 10, program: "PPLG", rombel: 1 } */
 function bacaKelas(nama: string, tingkat: number): Parsed | null {
   const m = nama.trim().toUpperCase().match(/^(XII|XI|X)\s+(.+?)[\s-]*(\d+)?$/);
   if (!m) return null;
   return { tingkat, program: m[2].trim(), rombel: m[3] ? parseInt(m[3], 10) : 1 };
 }
 
+/** Pilihan jurusan tujuan untuk satu siswa. */
 function pilihanJurusan(p: Parsed, tinggal: boolean): string[] {
   if (tinggal) return [p.program];
   if (p.tingkat === 10) return JURUSAN_NAIK_DARI_X[p.program] ?? [p.program];
@@ -59,14 +80,15 @@ interface Props {
 }
 
 export default function PilihManualPanel({ roster, onLanjut }: Props) {
+  // Kelas XII otomatis lulus: tidak diatur, hanya ditampilkan kalau filter tingkat XII dipilih.
   const otomatisLulus = useMemo(() => roster.filter((r) => r.tingkat === 12), [roster]);
   const daftar = useMemo(() => roster.filter((r) => r.tingkat !== 12), [roster]);
 
   const parsed = useMemo(() => {
     const map = new Map<string, Parsed | null>();
-    daftar.forEach((r) => map.set(r.siswa_id, bacaKelas(r.kelas_nama, r.tingkat)));
+    roster.forEach((r) => map.set(r.siswa_id, bacaKelas(r.kelas_nama, r.tingkat)));
     return map;
-  }, [daftar]);
+  }, [roster]);
 
   const maxRombel = useMemo(() => {
     let m = 4;
@@ -77,10 +99,12 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
   }, [parsed]);
 
   const [draft, setDraft] = useState<Record<string, Draft>>({});
-  const [filterKelas, setFilterKelas] = useState("semua");
+  const [filterTingkat, setFilterTingkat] = useState<"semua" | "10" | "11" | "12">("semua");
+  const [filterJurusan, setFilterJurusan] = useState("semua");
   const [cari, setCari] = useState("");
   const [hanyaBelumDipilih, setHanyaBelumDipilih] = useState(false);
 
+  // Isi awal: jurusan tujuan otomatis kalau hanya ada satu pilihan, rombel ikut rombel lama.
   useEffect(() => {
     const awal: Record<string, Draft> = {};
     daftar.forEach((r) => {
@@ -97,23 +121,38 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
     setDraft(awal);
   }, [daftar, parsed]);
 
-  const kelasAsalList = useMemo(
-    () => Array.from(new Set(daftar.map((r) => r.kelas_nama))).sort((a, b) => a.localeCompare(b, "id", { numeric: true })),
-    [daftar]
-  );
+  // Daftar jurusan untuk filter, mengikuti tingkat yang sedang dipilih.
+  const jurusanList = useMemo(() => {
+    const s = new Set<string>();
+    roster.forEach((r) => {
+      if (filterTingkat !== "semua" && String(r.tingkat) !== filterTingkat) return;
+      const p = parsed.get(r.siswa_id);
+      if (p) s.add(p.program);
+    });
+    return Array.from(s).sort();
+  }, [roster, parsed, filterTingkat]);
+
+  // Kalau jurusan yang dipilih tidak ada di tingkat baru, kembalikan ke "semua".
+  useEffect(() => {
+    if (filterJurusan !== "semua" && !jurusanList.includes(filterJurusan)) setFilterJurusan("semua");
+  }, [jurusanList, filterJurusan]);
 
   const tampil = useMemo(() => {
     const q = cari.trim().toLowerCase();
-    return daftar.filter((r) => {
-      if (filterKelas !== "semua" && r.kelas_nama !== filterKelas) return false;
+    return roster.filter((r) => {
+      if (filterTingkat !== "semua" && String(r.tingkat) !== filterTingkat) return false;
+      if (filterJurusan !== "semua" && parsed.get(r.siswa_id)?.program !== filterJurusan) return false;
       if (q && !(r.nama.toLowerCase().includes(q) || r.nis.toLowerCase().includes(q))) return false;
-      if (hanyaBelumDipilih && draft[r.siswa_id]?.program) return false;
+      if (hanyaBelumDipilih && (r.tingkat === 12 || draft[r.siswa_id]?.program)) return false;
       return true;
     });
-  }, [daftar, filterKelas, cari, hanyaBelumDipilih, draft]);
+  }, [roster, parsed, filterTingkat, filterJurusan, cari, hanyaBelumDipilih, draft]);
+
+  // Hanya baris yang bisa diatur (bukan kelas XII) yang bisa dicentang.
+  const tampilBisaDiatur = useMemo(() => tampil.filter((r) => r.tingkat !== 12 && draft[r.siswa_id]), [tampil, draft]);
 
   const dipilihIds = useMemo(() => daftar.filter((r) => draft[r.siswa_id]?.dipilih).map((r) => r.siswa_id), [daftar, draft]);
-  const semuaTampilDipilih = tampil.length > 0 && tampil.every((r) => draft[r.siswa_id]?.dipilih);
+  const semuaTampilDipilih = tampilBisaDiatur.length > 0 && tampilBisaDiatur.every((r) => draft[r.siswa_id]?.dipilih);
   const belumDipilihCount = daftar.filter((r) => !draft[r.siswa_id]?.program).length;
 
   const ubah = (id: string, patch: Partial<Draft>) =>
@@ -123,7 +162,7 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
     setDraft((prev) => {
       const next = { ...prev };
       ids.forEach((id) => {
-        const r = daftar.find((x) => x.siswa_id === id);
+        const r = roster.find((x) => x.siswa_id === id);
         const p = parsed.get(id);
         if (!r || !p || !next[id]) return;
         next[id] = { ...next[id], ...fn(r, p, next[id]) };
@@ -133,21 +172,34 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
 
   const toggleSemuaTampil = () => {
     const nilai = !semuaTampilDipilih;
-    ubahBanyak(tampil.map((r) => r.siswa_id), () => ({ dipilih: nilai }));
+    ubahBanyak(tampilBisaDiatur.map((r) => r.siswa_id), () => ({ dipilih: nilai }));
   };
 
+  const kosongkanPilihan = () => {
+    ubahBanyak(dipilihIds, () => ({ dipilih: false }));
+    setInfoBulk("");
+    setInfoUpload(null);
+  };
+
+  // ---- aksi massal untuk siswa yang dicentang ----
   const [bulkJurusan, setBulkJurusan] = useState("");
   const [bulkRombel, setBulkRombel] = useState("");
   const [infoBulk, setInfoBulk] = useState("");
 
-  const semuaJurusan = useMemo(() => {
+  // Pilihan jurusan tujuan mengikuti siswa yang sedang dicentang.
+  const jurusanTujuanOpsi = useMemo(() => {
     const s = new Set<string>();
-    daftar.forEach((r) => {
-      const p = parsed.get(r.siswa_id);
-      if (p) pilihanJurusan(p, false).forEach((j) => s.add(j));
+    dipilihIds.forEach((id) => {
+      const p = parsed.get(id);
+      const d = draft[id];
+      if (p && d) pilihanJurusan(p, d.tinggal).forEach((j) => s.add(j));
     });
     return Array.from(s).sort();
-  }, [daftar, parsed]);
+  }, [dipilihIds, parsed, draft]);
+
+  useEffect(() => {
+    if (bulkJurusan && !jurusanTujuanOpsi.includes(bulkJurusan)) setBulkJurusan("");
+  }, [jurusanTujuanOpsi, bulkJurusan]);
 
   const terapkanJurusanBulk = () => {
     if (!bulkJurusan) return;
@@ -183,6 +235,53 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
     setInfoBulk(`${dipilihIds.length} siswa ditandai ${tinggal ? "tinggal kelas" : "naik"}.`);
   };
 
+  // ---- pilih banyak siswa lewat file NIS ----
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [infoUpload, setInfoUpload] = useState<{
+    nama: string;
+    ditemukan: number;
+    tidakAda: string[];
+    kelasXII: number;
+  } | null>(null);
+
+  const handleFileNis = async (file: File) => {
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array" });
+      const nisSet = new Set<string>();
+      wb.SheetNames.forEach((n) => {
+        const rows = XLSX.utils.sheet_to_json<any[]>(wb.Sheets[n], { header: 1, raw: false, defval: "" });
+        rows.forEach((row) =>
+          row.forEach((cell) => {
+            const v = String(cell ?? "").trim();
+            if (/^\d{6,}$/.test(v)) nisSet.add(v);
+          })
+        );
+      });
+
+      const byNis = new Map(roster.map((r) => [r.nis, r]));
+      const ids: string[] = [];
+      const tidakAda: string[] = [];
+      let kelasXII = 0;
+      nisSet.forEach((nis) => {
+        const r = byNis.get(nis);
+        if (!r) tidakAda.push(nis);
+        else if (r.tingkat === 12) kelasXII++;
+        else ids.push(r.siswa_id);
+      });
+
+      ubahBanyak(ids, () => ({ dipilih: true }));
+      setInfoUpload({ nama: file.name, ditemukan: ids.length, tidakAda, kelasXII });
+      setFilterTingkat("semua");
+      setFilterJurusan("semua");
+      setCari("");
+    } catch (e: any) {
+      alert(`File tidak bisa dibaca: ${e.message ?? e}`);
+    } finally {
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+
   const lanjut = () => {
     const siap: SiapManual[] = [];
     const errorRows: ErrorManual[] = [];
@@ -212,9 +311,9 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
   return (
     <div>
       <p className="text-sm text-muted mb-4">
-        Semua siswa sudah diisi otomatis naik ke jurusan lanjutannya (PPLG → RPL, PM → BR, dst.).
+        Semua siswa sudah diisi otomatis naik ke jurusan lanjutannya (PPLG → RPL, PM → BR, TJKT → TKJ, dst.).
         Siswa <b className="text-ink">MPLB</b> perlu dipilih sendiri antara MP atau MLOG.
-        Ubah yang berbeda, lalu lanjut ke pratinjau.
+        Pilih tingkat dan jurusan untuk mengatur satu angkatan sekaligus, atau upload file NIS untuk memilih banyak siswa.
       </p>
 
       {belumDipilihCount > 0 && (
@@ -230,6 +329,7 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
         </div>
       )}
 
+      {/* Filter */}
       <div className="flex flex-wrap gap-2 mb-3">
         <div className="relative flex-1 min-w-[180px]">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
@@ -240,23 +340,81 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
             className={`${controlCls} w-full pl-9 bg-surface`}
           />
         </div>
-        <select value={filterKelas} onChange={(e) => setFilterKelas(e.target.value)} className={`${controlCls} bg-surface`}>
-          <option value="semua">Semua kelas asal</option>
-          {kelasAsalList.map((k) => (
-            <option key={k} value={k}>
-              {k}
+        <select
+          value={filterTingkat}
+          onChange={(e) => setFilterTingkat(e.target.value as any)}
+          className={`${controlCls} !w-auto bg-surface`}
+        >
+          <option value="semua">Semua tingkat</option>
+          <option value="10">Kelas X (10)</option>
+          <option value="11">Kelas XI (11)</option>
+          <option value="12">Kelas XII (12)</option>
+        </select>
+        <select
+          value={filterJurusan}
+          onChange={(e) => setFilterJurusan(e.target.value)}
+          className={`${controlCls} !w-auto bg-surface`}
+        >
+          <option value="semua">Semua jurusan</option>
+          {jurusanList.map((j) => (
+            <option key={j} value={j}>
+              {j}
             </option>
           ))}
         </select>
+        <button
+          onClick={() => fileRef.current?.click()}
+          className="flex items-center gap-2 bg-white border border-primary-100 hover:bg-surface text-ink text-sm font-semibold px-3.5 py-2 rounded-xl transition-colors"
+        >
+          <FileUp size={15} />
+          Upload NIS
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".xlsx,.xls,.csv,.txt"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) handleFileNis(f);
+          }}
+        />
       </div>
 
+      {infoUpload && (
+        <div className="rounded-xl bg-primary-50/70 border border-primary-100 text-sm text-primary-900 px-3.5 py-3 mb-3 flex items-start justify-between gap-3">
+          <div>
+            <p>
+              <b>{infoUpload.nama}</b>: {infoUpload.ditemukan} siswa dipilih
+              {infoUpload.kelasXII > 0 && `, ${infoUpload.kelasXII} dilewati karena kelas XII (otomatis lulus)`}
+              {infoUpload.tidakAda.length > 0 && `, ${infoUpload.tidakAda.length} NIS tidak ditemukan`}.
+            </p>
+            {infoUpload.tidakAda.length > 0 && (
+              <p className="text-xs mt-1 text-amber-800 break-words">
+                Tidak ditemukan: {infoUpload.tidakAda.slice(0, 10).join(", ")}
+                {infoUpload.tidakAda.length > 10 && ` dan ${infoUpload.tidakAda.length - 10} lainnya`}
+              </p>
+            )}
+          </div>
+          <button onClick={() => setInfoUpload(null)} className="text-muted hover:text-ink shrink-0" title="Tutup">
+            <XIcon size={14} />
+          </button>
+        </div>
+      )}
+
+      {/* Aksi massal */}
       {dipilihIds.length > 0 && (
         <div className="rounded-xl bg-primary-50/70 border border-primary-100 p-3.5 mb-3">
-          <p className="text-sm font-semibold text-primary-800 mb-2.5">{dipilihIds.length} siswa dipilih</p>
+          <div className="flex items-center justify-between mb-2.5">
+            <p className="text-sm font-semibold text-primary-800">{dipilihIds.length} siswa dipilih</p>
+            <button onClick={kosongkanPilihan} className="text-xs font-semibold text-primary-700 underline">
+              Kosongkan pilihan
+            </button>
+          </div>
           <div className="flex flex-wrap gap-2 items-center">
-            <select value={bulkJurusan} onChange={(e) => setBulkJurusan(e.target.value)} className={`${controlCls} bg-white`}>
+            <select value={bulkJurusan} onChange={(e) => setBulkJurusan(e.target.value)} className={`${controlCls} !w-auto bg-white`}>
               <option value="">Jurusan tujuan…</option>
-              {semuaJurusan.map((j) => (
+              {jurusanTujuanOpsi.map((j) => (
                 <option key={j} value={j}>
                   {j}
                 </option>
@@ -270,7 +428,7 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
               Terapkan
             </button>
 
-            <select value={bulkRombel} onChange={(e) => setBulkRombel(e.target.value)} className={`${controlCls} bg-white`}>
+            <select value={bulkRombel} onChange={(e) => setBulkRombel(e.target.value)} className={`${controlCls} !w-auto bg-white`}>
               <option value="">Rombel…</option>
               {Array.from({ length: maxRombel }, (_, i) => i + 1).map((n) => (
                 <option key={n} value={n}>
@@ -304,6 +462,7 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
         </div>
       )}
 
+      {/* Tabel */}
       <div className="border border-primary-100 rounded-xl overflow-hidden max-h-[28rem] overflow-y-auto mb-5">
         <table className="w-full text-xs">
           <thead className="sticky top-0 bg-surface z-10">
@@ -327,6 +486,29 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
               </tr>
             )}
             {tampil.map((r) => {
+              // Kelas XII: otomatis lulus, tidak bisa diatur.
+              if (r.tingkat === 12) {
+                return (
+                  <tr key={r.siswa_id} className="border-t border-primary-50">
+                    <td />
+                    <td className="px-3 py-2 text-ink font-medium">
+                      {r.nama}
+                      <span className="block text-muted font-normal">{r.nis}</span>
+                    </td>
+                    <td className="px-3 py-2 text-muted">{r.kelas_nama}</td>
+                    <td className="px-3 py-2 text-primary-500">
+                      <ArrowRight size={12} />
+                    </td>
+                    <td className="px-3 py-2 text-muted">Lulus</td>
+                    <td className="px-3 py-2">
+                      <span className="inline-flex items-center gap-1 bg-primary-50 text-primary-700 font-semibold px-2 py-0.5 rounded-full">
+                        <GraduationCap size={11} /> Otomatis
+                      </span>
+                    </td>
+                  </tr>
+                );
+              }
+
               const p = parsed.get(r.siswa_id);
               const d = draft[r.siswa_id];
               if (!p || !d) {
