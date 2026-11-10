@@ -47,11 +47,15 @@ const ROMAWI: Record<number, string> = { 10: "X", 11: "XI", 12: "XII" };
 
 type Parsed = { tingkat: number; program: string; rombel: number };
 type Draft = {
+  /** Kelas X/XI: tinggal kelas. Kelas XII: tidak lulus. */
   tinggal: boolean;
   program: string | null; // null = belum dipilih
   rombel: number;
   dipilih: boolean; // dicentang untuk aksi massal
 };
+
+const labelTinggal = (tingkat: number) => (tingkat === 12 ? "Tidak lulus" : "Tinggal kelas");
+const labelNaik = (tingkat: number) => (tingkat === 12 ? "Lulus" : "Naik");
 
 /** "X PPLG 1" -> { tingkat: 10, program: "PPLG", rombel: 1 } */
 function bacaKelas(nama: string, tingkat: number): Parsed | null {
@@ -67,8 +71,10 @@ function pilihanJurusan(p: Parsed, tinggal: boolean): string[] {
   return [p.program];
 }
 
+/** Nama kelas tujuan. null = belum dipilih, atau siswa XII yang lulus (tidak punya kelas baru). */
 function namaTujuan(p: Parsed, d: Draft): string | null {
   if (!d.program) return null;
+  if (p.tingkat === 12 && !d.tinggal) return null;
   const tingkatBaru = d.tinggal ? p.tingkat : p.tingkat + 1;
   return `${ROMAWI[tingkatBaru]} ${d.program} ${d.rombel}`;
 }
@@ -88,10 +94,6 @@ interface Props {
 }
 
 export default function PilihManualPanel({ roster, onLanjut }: Props) {
-  // Kelas XII otomatis lulus: tidak diatur, hanya ditampilkan kalau filter tingkat XII dipilih.
-  const otomatisLulus = useMemo(() => roster.filter((r) => r.tingkat === 12), [roster]);
-  const daftar = useMemo(() => roster.filter((r) => r.tingkat !== 12), [roster]);
-
   const parsed = useMemo(() => {
     const map = new Map<string, Parsed | null>();
     roster.forEach((r) => map.set(r.siswa_id, bacaKelas(r.kelas_nama, r.tingkat)));
@@ -113,9 +115,10 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
   const [hanyaBelumDipilih, setHanyaBelumDipilih] = useState(false);
 
   // Isi awal: jurusan tujuan otomatis kalau hanya ada satu pilihan, rombel ikut rombel lama.
+  // Kelas XII defaultnya lulus.
   useEffect(() => {
     const awal: Record<string, Draft> = {};
-    daftar.forEach((r) => {
+    roster.forEach((r) => {
       const p = parsed.get(r.siswa_id);
       if (!p) return;
       const pil = pilihanJurusan(p, false);
@@ -127,7 +130,7 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
       };
     });
     setDraft(awal);
-  }, [daftar, parsed]);
+  }, [roster, parsed]);
 
   // Daftar jurusan untuk filter, mengikuti tingkat yang sedang dipilih.
   const jurusanList = useMemo(() => {
@@ -156,12 +159,20 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
     });
   }, [roster, parsed, filterTingkat, filterJurusan, cari, hanyaBelumDipilih, draft]);
 
-  // Hanya baris yang bisa diatur (bukan kelas XII) yang bisa dicentang.
-  const tampilBisaDiatur = useMemo(() => tampil.filter((r) => r.tingkat !== 12 && draft[r.siswa_id]), [tampil, draft]);
+  const tampilBisaDiatur = useMemo(() => tampil.filter((r) => draft[r.siswa_id]), [tampil, draft]);
 
-  const dipilihIds = useMemo(() => daftar.filter((r) => draft[r.siswa_id]?.dipilih).map((r) => r.siswa_id), [daftar, draft]);
+  const dipilihIds = useMemo(() => roster.filter((r) => draft[r.siswa_id]?.dipilih).map((r) => r.siswa_id), [roster, draft]);
   const semuaTampilDipilih = tampilBisaDiatur.length > 0 && tampilBisaDiatur.every((r) => draft[r.siswa_id]?.dipilih);
-  const belumDipilihCount = daftar.filter((r) => !draft[r.siswa_id]?.program).length;
+  const belumDipilihCount = roster.filter((r) => !draft[r.siswa_id]?.program).length;
+
+  const jumlahLulus = useMemo(
+    () => roster.filter((r) => r.tingkat === 12 && draft[r.siswa_id] && !draft[r.siswa_id].tinggal).length,
+    [roster, draft]
+  );
+  const jumlahTidakLulus = useMemo(
+    () => roster.filter((r) => r.tingkat === 12 && draft[r.siswa_id]?.tinggal).length,
+    [roster, draft]
+  );
 
   const ubah = (id: string, patch: Partial<Draft>) =>
     setDraft((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
@@ -194,7 +205,6 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
   const [infoTempel, setInfoTempel] = useState<{
     ditemukan: number;
     tidakAda: string[];
-    kelasXII: number;
   } | null>(null);
 
   const nisTerbaca = useMemo(() => ambilNis(teksNis), [teksNis]);
@@ -209,16 +219,14 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
     const byNis = new Map(roster.map((r) => [r.nis, r]));
     const ids: string[] = [];
     const tidakAda: string[] = [];
-    let kelasXII = 0;
     nisTerbaca.forEach((nis) => {
       const r = byNis.get(nis);
       if (!r) tidakAda.push(nis);
-      else if (r.tingkat === 12) kelasXII++;
       else ids.push(r.siswa_id);
     });
 
     ubahBanyak(ids, () => ({ dipilih: true }));
-    setInfoTempel({ ditemukan: ids.length, tidakAda, kelasXII });
+    setInfoTempel({ ditemukan: ids.length, tidakAda });
     // Reset filter supaya semua siswa yang terpilih kelihatan di tabel.
     setFilterTingkat("semua");
     setFilterJurusan("semua");
@@ -274,18 +282,26 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
       const pil = pilihanJurusan(p, tinggal);
       return { tinggal, program: pil.length === 1 ? pil[0] : null };
     });
-    setInfoBulk(`${dipilihIds.length} siswa ditandai ${tinggal ? "tinggal kelas" : "naik"}.`);
+    setInfoBulk(
+      `${dipilihIds.length} siswa ditandai ${tinggal ? "tinggal kelas / tidak lulus" : "naik / lulus"}.`
+    );
   };
 
   const lanjut = () => {
     const siap: SiapManual[] = [];
     const errorRows: ErrorManual[] = [];
     const belum: RosterItem[] = [];
-    daftar.forEach((r) => {
+    const lulus: RosterItem[] = [];
+    roster.forEach((r) => {
       const p = parsed.get(r.siswa_id);
       const d = draft[r.siswa_id];
       if (!p || !d) {
         errorRows.push({ nis: r.nis, kelasBaru: "", pesan: `Format kelas asal "${r.kelas_nama}" tidak dikenali.` });
+        return;
+      }
+      // Kelas XII yang lulus: tidak punya kelas baru.
+      if (r.tingkat === 12 && !d.tinggal) {
+        lulus.push(r);
         return;
       }
       const nama = namaTujuan(p, d);
@@ -300,7 +316,7 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
       }
       siap.push({ roster: r, kelasBaru: kb, hasil: d.tinggal ? "tinggal_kelas" : "naik" });
     });
-    onLanjut({ siap, errorRows, belumDitempatkan: belum, otomatisLulus });
+    onLanjut({ siap, errorRows, belumDitempatkan: belum, otomatisLulus: lulus });
   };
 
   return (
@@ -308,6 +324,7 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
       <p className="text-sm text-muted mb-4">
         Semua siswa sudah diisi otomatis naik ke jurusan lanjutannya (PPLG → RPL, PM → BR, TJKT → TKJ, dst.).
         Siswa <b className="text-ink">MPLB</b> perlu dipilih sendiri antara MP atau MLOG.
+        Kelas XII otomatis <b className="text-ink">lulus</b>, tandai &quot;Tidak lulus&quot; untuk yang harus mengulang.
         Pilih tingkat dan jurusan untuk mengatur satu angkatan sekaligus, atau tempel daftar NIS untuk memilih banyak siswa.
       </p>
 
@@ -421,7 +438,6 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
           <div>
             <p>
               <b>{infoTempel.ditemukan}</b> siswa dipilih
-              {infoTempel.kelasXII > 0 && `, ${infoTempel.kelasXII} dilewati karena kelas XII (otomatis lulus)`}
               {infoTempel.tidakAda.length > 0 && `, ${infoTempel.tidakAda.length} NIS tidak ditemukan`}.
             </p>
             {infoTempel.tidakAda.length > 0 && (
@@ -483,14 +499,16 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
             <button
               onClick={() => setTinggalBulk(true)}
               className="text-sm font-semibold bg-amber-100 hover:bg-amber-200 text-amber-800 px-3.5 py-2 rounded-xl"
+              title="Kelas X/XI: tinggal kelas. Kelas XII: tidak lulus."
             >
-              Tinggal kelas
+              Tinggal kelas / Tidak lulus
             </button>
             <button
               onClick={() => setTinggalBulk(false)}
               className="text-sm font-semibold bg-white border border-primary-200 hover:bg-primary-50 text-primary-800 px-3.5 py-2 rounded-xl"
+              title="Kelas X/XI: naik. Kelas XII: lulus."
             >
-              Naik
+              Naik / Lulus
             </button>
           </div>
           {infoBulk && <p className="text-xs text-primary-800 mt-2.5">{infoBulk}</p>}
@@ -521,29 +539,6 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
               </tr>
             )}
             {tampil.map((r) => {
-              // Kelas XII: otomatis lulus, tidak bisa diatur.
-              if (r.tingkat === 12) {
-                return (
-                  <tr key={r.siswa_id} className="border-t border-primary-50">
-                    <td />
-                    <td className="px-3 py-2 text-ink font-medium">
-                      {r.nama}
-                      <span className="block text-muted font-normal">{r.nis}</span>
-                    </td>
-                    <td className="px-3 py-2 text-muted">{r.kelas_nama}</td>
-                    <td className="px-3 py-2 text-primary-500">
-                      <ArrowRight size={12} />
-                    </td>
-                    <td className="px-3 py-2 text-muted">Lulus</td>
-                    <td className="px-3 py-2">
-                      <span className="inline-flex items-center gap-1 bg-primary-50 text-primary-700 font-semibold px-2 py-0.5 rounded-full">
-                        <GraduationCap size={11} /> Otomatis
-                      </span>
-                    </td>
-                  </tr>
-                );
-              }
-
               const p = parsed.get(r.siswa_id);
               const d = draft[r.siswa_id];
               if (!p || !d) {
@@ -560,6 +555,7 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
               }
               const pil = pilihanJurusan(p, d.tinggal);
               const tujuan = namaTujuan(p, d);
+              const lulus = p.tingkat === 12 && !d.tinggal;
               return (
                 <tr key={r.siswa_id} className={`border-t border-primary-50 ${d.dipilih ? "bg-primary-50/50" : ""}`}>
                   <td className="px-3 py-2">
@@ -574,40 +570,46 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
                     <ArrowRight size={12} />
                   </td>
                   <td className="px-3 py-2">
-                    <div className="flex items-center gap-1.5">
-                      {pil.length > 1 ? (
+                    {lulus ? (
+                      <span className="inline-flex items-center gap-1 text-muted">
+                        <GraduationCap size={12} /> Lulus
+                      </span>
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        {pil.length > 1 ? (
+                          <select
+                            value={d.program ?? ""}
+                            onChange={(e) => ubah(r.siswa_id, { program: e.target.value || null })}
+                            className={`rounded-lg border px-2 py-1 text-xs ${
+                              d.program ? "border-primary-200 bg-white" : "border-amber-300 bg-amber-50"
+                            }`}
+                          >
+                            <option value="">Pilih jurusan…</option>
+                            {pil.map((j) => (
+                              <option key={j} value={j}>
+                                {j}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="text-ink font-medium">
+                            {ROMAWI[d.tinggal ? p.tingkat : p.tingkat + 1]} {pil[0]}
+                          </span>
+                        )}
                         <select
-                          value={d.program ?? ""}
-                          onChange={(e) => ubah(r.siswa_id, { program: e.target.value || null })}
-                          className={`rounded-lg border px-2 py-1 text-xs ${
-                            d.program ? "border-primary-200 bg-white" : "border-amber-300 bg-amber-50"
-                          }`}
+                          value={d.rombel}
+                          onChange={(e) => ubah(r.siswa_id, { rombel: parseInt(e.target.value, 10) })}
+                          className="rounded-lg border border-primary-200 bg-white px-1.5 py-1 text-xs"
                         >
-                          <option value="">Pilih jurusan…</option>
-                          {pil.map((j) => (
-                            <option key={j} value={j}>
-                              {j}
+                          {Array.from({ length: Math.max(maxRombel, d.rombel) }, (_, i) => i + 1).map((n) => (
+                            <option key={n} value={n}>
+                              {n}
                             </option>
                           ))}
                         </select>
-                      ) : (
-                        <span className="text-ink font-medium">
-                          {ROMAWI[d.tinggal ? p.tingkat : p.tingkat + 1]} {pil[0]}
-                        </span>
-                      )}
-                      <select
-                        value={d.rombel}
-                        onChange={(e) => ubah(r.siswa_id, { rombel: parseInt(e.target.value, 10) })}
-                        className="rounded-lg border border-primary-200 bg-white px-1.5 py-1 text-xs"
-                      >
-                        {Array.from({ length: Math.max(maxRombel, d.rombel) }, (_, i) => i + 1).map((n) => (
-                          <option key={n} value={n}>
-                            {n}
-                          </option>
-                        ))}
-                      </select>
-                      {pil.length > 1 && d.program && <span className="text-muted">= {tujuan}</span>}
-                    </div>
+                        {pil.length > 1 && d.program && <span className="text-muted">= {tujuan}</span>}
+                      </div>
+                    )}
                   </td>
                   <td className="px-3 py-2">
                     <button
@@ -619,9 +621,9 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
                       className={`font-semibold px-2 py-0.5 rounded-full ${
                         d.tinggal ? "bg-amber-50 text-amber-700" : "bg-primary-50 text-primary-700"
                       }`}
-                      title="Klik untuk ganti Naik / Tinggal kelas"
+                      title={`Klik untuk ganti ${labelNaik(p.tingkat)} / ${labelTinggal(p.tingkat)}`}
                     >
-                      {d.tinggal ? "Tinggal kelas" : "Naik"}
+                      {d.tinggal ? labelTinggal(p.tingkat) : labelNaik(p.tingkat)}
                     </button>
                   </td>
                 </tr>
@@ -634,7 +636,8 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <p className="text-xs text-muted flex items-center gap-1.5">
           <CheckCircle2 size={14} className="text-primary-600" />
-          Kelas XII ({otomatisLulus.length} siswa) otomatis lulus.
+          Kelas XII: {jumlahLulus} siswa lulus
+          {jumlahTidakLulus > 0 && `, ${jumlahTidakLulus} tidak lulus (tetap di XII)`}.
         </p>
         <button
           onClick={lanjut}
