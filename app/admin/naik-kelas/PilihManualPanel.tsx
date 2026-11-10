@@ -1,13 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import * as XLSX from "xlsx";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   Search,
   CheckCircle2,
   AlertTriangle,
-  FileUp,
+  ClipboardList,
   GraduationCap,
   X as XIcon,
 } from "lucide-react";
@@ -72,6 +71,15 @@ function namaTujuan(p: Parsed, d: Draft): string | null {
   if (!d.program) return null;
   const tingkatBaru = d.tinggal ? p.tingkat : p.tingkat + 1;
   return `${ROMAWI[tingkatBaru]} ${d.program} ${d.rombel}`;
+}
+
+/**
+ * Ambil semua NIS dari teks tempelan.
+ * Setiap deret angka minimal 6 digit dianggap satu NIS, jadi pemisahnya bebas:
+ * baris baru, spasi, tab, koma, titik koma, atau satu baris berisi nama + NIS.
+ */
+function ambilNis(teks: string): string[] {
+  return Array.from(new Set(teks.match(/\d{6,}/g) ?? []));
 }
 
 interface Props {
@@ -175,16 +183,50 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
     ubahBanyak(tampilBisaDiatur.map((r) => r.siswa_id), () => ({ dipilih: nilai }));
   };
 
-  const kosongkanPilihan = () => {
-    ubahBanyak(dipilihIds, () => ({ dipilih: false }));
-    setInfoBulk("");
-    setInfoUpload(null);
-  };
-
   // ---- aksi massal untuk siswa yang dicentang ----
   const [bulkJurusan, setBulkJurusan] = useState("");
   const [bulkRombel, setBulkRombel] = useState("");
   const [infoBulk, setInfoBulk] = useState("");
+
+  // ---- pilih banyak siswa dengan menempel NIS ----
+  const [bukaTempel, setBukaTempel] = useState(false);
+  const [teksNis, setTeksNis] = useState("");
+  const [infoTempel, setInfoTempel] = useState<{
+    ditemukan: number;
+    tidakAda: string[];
+    kelasXII: number;
+  } | null>(null);
+
+  const nisTerbaca = useMemo(() => ambilNis(teksNis), [teksNis]);
+
+  const kosongkanPilihan = () => {
+    ubahBanyak(dipilihIds, () => ({ dipilih: false }));
+    setInfoBulk("");
+    setInfoTempel(null);
+  };
+
+  const terapkanTempel = () => {
+    const byNis = new Map(roster.map((r) => [r.nis, r]));
+    const ids: string[] = [];
+    const tidakAda: string[] = [];
+    let kelasXII = 0;
+    nisTerbaca.forEach((nis) => {
+      const r = byNis.get(nis);
+      if (!r) tidakAda.push(nis);
+      else if (r.tingkat === 12) kelasXII++;
+      else ids.push(r.siswa_id);
+    });
+
+    ubahBanyak(ids, () => ({ dipilih: true }));
+    setInfoTempel({ ditemukan: ids.length, tidakAda, kelasXII });
+    // Reset filter supaya semua siswa yang terpilih kelihatan di tabel.
+    setFilterTingkat("semua");
+    setFilterJurusan("semua");
+    setCari("");
+    setHanyaBelumDipilih(false);
+    setTeksNis("");
+    setBukaTempel(false);
+  };
 
   // Pilihan jurusan tujuan mengikuti siswa yang sedang dicentang.
   const jurusanTujuanOpsi = useMemo(() => {
@@ -235,53 +277,6 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
     setInfoBulk(`${dipilihIds.length} siswa ditandai ${tinggal ? "tinggal kelas" : "naik"}.`);
   };
 
-  // ---- pilih banyak siswa lewat file NIS ----
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [infoUpload, setInfoUpload] = useState<{
-    nama: string;
-    ditemukan: number;
-    tidakAda: string[];
-    kelasXII: number;
-  } | null>(null);
-
-  const handleFileNis = async (file: File) => {
-    try {
-      const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type: "array" });
-      const nisSet = new Set<string>();
-      wb.SheetNames.forEach((n) => {
-        const rows = XLSX.utils.sheet_to_json<any[]>(wb.Sheets[n], { header: 1, raw: false, defval: "" });
-        rows.forEach((row) =>
-          row.forEach((cell) => {
-            const v = String(cell ?? "").trim();
-            if (/^\d{6,}$/.test(v)) nisSet.add(v);
-          })
-        );
-      });
-
-      const byNis = new Map(roster.map((r) => [r.nis, r]));
-      const ids: string[] = [];
-      const tidakAda: string[] = [];
-      let kelasXII = 0;
-      nisSet.forEach((nis) => {
-        const r = byNis.get(nis);
-        if (!r) tidakAda.push(nis);
-        else if (r.tingkat === 12) kelasXII++;
-        else ids.push(r.siswa_id);
-      });
-
-      ubahBanyak(ids, () => ({ dipilih: true }));
-      setInfoUpload({ nama: file.name, ditemukan: ids.length, tidakAda, kelasXII });
-      setFilterTingkat("semua");
-      setFilterJurusan("semua");
-      setCari("");
-    } catch (e: any) {
-      alert(`File tidak bisa dibaca: ${e.message ?? e}`);
-    } finally {
-      if (fileRef.current) fileRef.current.value = "";
-    }
-  };
-
   const lanjut = () => {
     const siap: SiapManual[] = [];
     const errorRows: ErrorManual[] = [];
@@ -313,7 +308,7 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
       <p className="text-sm text-muted mb-4">
         Semua siswa sudah diisi otomatis naik ke jurusan lanjutannya (PPLG → RPL, PM → BR, TJKT → TKJ, dst.).
         Siswa <b className="text-ink">MPLB</b> perlu dipilih sendiri antara MP atau MLOG.
-        Pilih tingkat dan jurusan untuk mengatur satu angkatan sekaligus, atau upload file NIS untuk memilih banyak siswa.
+        Pilih tingkat dan jurusan untuk mengatur satu angkatan sekaligus, atau tempel daftar NIS untuk memilih banyak siswa.
       </p>
 
       {belumDipilihCount > 0 && (
@@ -363,40 +358,80 @@ export default function PilihManualPanel({ roster, onLanjut }: Props) {
           ))}
         </select>
         <button
-          onClick={() => fileRef.current?.click()}
-          className="flex items-center gap-2 bg-white border border-primary-100 hover:bg-surface text-ink text-sm font-semibold px-3.5 py-2 rounded-xl transition-colors"
+          onClick={() => setBukaTempel((v) => !v)}
+          className={`flex items-center gap-2 border text-ink text-sm font-semibold px-3.5 py-2 rounded-xl transition-colors ${
+            bukaTempel ? "bg-primary-50 border-primary-200" : "bg-white border-primary-100 hover:bg-surface"
+          }`}
         >
-          <FileUp size={15} />
-          Upload NIS
+          <ClipboardList size={15} />
+          Tempel NIS
         </button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".xlsx,.xls,.csv,.txt"
-          className="hidden"
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) handleFileNis(f);
-          }}
-        />
       </div>
 
-      {infoUpload && (
+      {/* Kolom tempel NIS */}
+      {bukaTempel && (
+        <div className="rounded-xl border border-primary-100 bg-surface p-3.5 mb-3">
+          <p className="text-sm font-semibold text-ink mb-1">Tempel daftar NIS</p>
+          <p className="text-xs text-muted mb-2.5">
+            Salin kolom NIS dari data sekolah, lalu tempel di bawah. Satu NIS per baris, atau dipisah spasi atau koma.
+            Baris yang berisi nama dan NIS sekaligus juga bisa, angka NIS-nya akan diambil otomatis.
+          </p>
+          <textarea
+            value={teksNis}
+            onChange={(e) => setTeksNis(e.target.value)}
+            rows={6}
+            placeholder={"2682010355\n2682010356\n2682010357"}
+            className={`${controlCls} w-full font-mono text-xs bg-white`}
+            autoFocus
+          />
+          <div className="flex items-center justify-between gap-3 flex-wrap mt-2.5">
+            <p className="text-xs text-muted">
+              {nisTerbaca.length > 0 ? (
+                <>
+                  <b className="text-ink">{nisTerbaca.length}</b> NIS terbaca
+                </>
+              ) : (
+                "Belum ada NIS yang terbaca"
+              )}
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  setBukaTempel(false);
+                  setTeksNis("");
+                }}
+                className="text-sm font-semibold text-muted hover:text-ink px-3.5 py-2 rounded-xl"
+              >
+                Batal
+              </button>
+              <button
+                onClick={terapkanTempel}
+                disabled={nisTerbaca.length === 0}
+                className="text-sm font-semibold bg-primary-700 hover:bg-primary-800 disabled:opacity-50 text-white px-4 py-2 rounded-xl"
+              >
+                Pilih {nisTerbaca.length > 0 ? `${nisTerbaca.length} ` : ""}siswa
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {infoTempel && (
         <div className="rounded-xl bg-primary-50/70 border border-primary-100 text-sm text-primary-900 px-3.5 py-3 mb-3 flex items-start justify-between gap-3">
           <div>
             <p>
-              <b>{infoUpload.nama}</b>: {infoUpload.ditemukan} siswa dipilih
-              {infoUpload.kelasXII > 0 && `, ${infoUpload.kelasXII} dilewati karena kelas XII (otomatis lulus)`}
-              {infoUpload.tidakAda.length > 0 && `, ${infoUpload.tidakAda.length} NIS tidak ditemukan`}.
+              <b>{infoTempel.ditemukan}</b> siswa dipilih
+              {infoTempel.kelasXII > 0 && `, ${infoTempel.kelasXII} dilewati karena kelas XII (otomatis lulus)`}
+              {infoTempel.tidakAda.length > 0 && `, ${infoTempel.tidakAda.length} NIS tidak ditemukan`}.
             </p>
-            {infoUpload.tidakAda.length > 0 && (
+            {infoTempel.tidakAda.length > 0 && (
               <p className="text-xs mt-1 text-amber-800 break-words">
-                Tidak ditemukan: {infoUpload.tidakAda.slice(0, 10).join(", ")}
-                {infoUpload.tidakAda.length > 10 && ` dan ${infoUpload.tidakAda.length - 10} lainnya`}
+                Tidak ditemukan: {infoTempel.tidakAda.slice(0, 10).join(", ")}
+                {infoTempel.tidakAda.length > 10 && ` dan ${infoTempel.tidakAda.length - 10} lainnya`}
               </p>
             )}
           </div>
-          <button onClick={() => setInfoUpload(null)} className="text-muted hover:text-ink shrink-0" title="Tutup">
+          <button onClick={() => setInfoTempel(null)} className="text-muted hover:text-ink shrink-0" title="Tutup">
             <XIcon size={14} />
           </button>
         </div>
