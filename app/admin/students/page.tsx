@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ChevronRight,
-  Loader2,
   Plus,
   Search,
   Upload,
@@ -15,6 +14,7 @@ import {
 import { fetchAllStudents } from "@/lib/assessmentService";
 import AddStudentModal from "@/components/AddStudentModal";
 import ImportStudentsModal from "@/components/ImportStudentsModal";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import {
   Avatar,
   EmptyState,
@@ -37,7 +37,11 @@ export default function ManageStudentsPage() {
   const [classFilter, setClassFilter] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // Dialog konfirmasi hapus
+  const [toDelete, setToDelete] = useState<any | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -54,24 +58,31 @@ export default function ManageStudentsPage() {
     loadStudents();
   }, []);
 
-  const handleDelete = async (id: string, name: string) => {
-    if (
-      !confirm(
-        `Hapus siswa "${name}"? Akun login dan seluruh datanya akan dihapus permanen. Tindakan ini tidak bisa dibatalkan.`
-      )
-    ) {
-      return;
-    }
-    setDeletingId(id);
+  const askDelete = (student: any) => {
+    setDeleteError(null);
+    setToDelete(student);
+  };
+
+  const closeDelete = () => {
+    if (deleting) return;
+    setToDelete(null);
+    setDeleteError(null);
+  };
+
+  const confirmDelete = async () => {
+    if (!toDelete) return;
+    setDeleting(true);
+    setDeleteError(null);
     try {
-      const res = await fetch(`/api/students/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/students/${toDelete.id}`, { method: "DELETE" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Gagal menghapus siswa.");
-      setStudents((prev) => prev.filter((s) => s.id !== id));
+      setStudents((prev) => prev.filter((s) => s.id !== toDelete.id));
+      setToDelete(null);
     } catch (err: any) {
-      alert(err.message ?? "Gagal menghapus siswa.");
+      setDeleteError(err.message ?? "Gagal menghapus siswa.");
     } finally {
-      setDeletingId(null);
+      setDeleting(false);
     }
   };
 
@@ -263,16 +274,12 @@ export default function ManageStudentsPage() {
                             />
                           </Link>
                           <button
-                            onClick={() => handleDelete(s.id, s.full_name)}
-                            disabled={deletingId === s.id}
-                            className="w-8 h-8 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors disabled:opacity-50"
+                            onClick={() => askDelete(s)}
+                            className="w-8 h-8 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors"
                             title="Hapus siswa"
+                            aria-label={`Hapus ${s.full_name}`}
                           >
-                            {deletingId === s.id ? (
-                              <Loader2 size={14} className="animate-spin text-red-600" />
-                            ) : (
-                              <Trash2 size={14} color="#dc2626" />
-                            )}
+                            <Trash2 size={14} color="#dc2626" />
                           </button>
                         </div>
                       </td>
@@ -301,6 +308,28 @@ export default function ManageStudentsPage() {
       {showImportModal && (
         <ImportStudentsModal onClose={() => setShowImportModal(false)} onImported={loadStudents} />
       )}
+
+      <ConfirmDialog
+        open={!!toDelete}
+        title="Hapus siswa ini?"
+        subject={toDelete?.full_name}
+        meta={
+          toDelete
+            ? [toDelete.class_name, toDelete.nis ? `NIS ${toDelete.nis}` : null].filter(Boolean).join(" • ")
+            : undefined
+        }
+        description={
+          <>
+            Akun login dan <b className="text-ink">seluruh datanya</b> akan dihapus permanen dan tidak bisa
+            dikembalikan.
+          </>
+        }
+        confirmLabel="Ya, Hapus"
+        loading={deleting}
+        error={deleteError}
+        onConfirm={confirmDelete}
+        onCancel={closeDelete}
+      />
     </div>
   );
 }
