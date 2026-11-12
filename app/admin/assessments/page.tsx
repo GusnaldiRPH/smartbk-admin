@@ -24,6 +24,12 @@ import {
   type AssessmentAdmin,
   type ServiceOption,
 } from "@/lib/assessmentAdminService";
+import {
+  createDimension,
+  deleteDimension,
+  fetchDimensionsForAssessment,
+  updateDimension,
+} from "@/lib/assessmentService";
 import { EmptyState, PageHeader, controlCls, labelCls } from "@/components/ui";
 
 // Nilai yang tersimpan di database (key) TIDAK diubah, karena aplikasi memakainya
@@ -64,7 +70,12 @@ const TYPE_INFO: Record<string, { label: string; hint: string }> = {
 const TYPE_ORDER = ["form", "stress_scale", "learning_style", "disc", "rmib"];
 const typeLabel = (t: string) => TYPE_INFO[t]?.label ?? t;
 
+// Tipe yang hasilnya dihitung per dimensi, jadi perlu daftar dimensi.
+const DIMENSION_TYPES = ["learning_style", "disc", "study_plan"];
+
 const ROMAWI: Record<number, string> = { 10: "X", 11: "XI", 12: "XII" };
+
+type DimRow = { id?: string; code: string; label: string; description: string };
 
 function Switch({
   on,
@@ -122,12 +133,102 @@ function AssessmentModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Dimensi (hanya dipakai untuk tipe Dimensi)
+  const [dims, setDims] = useState<DimRow[]>([]);
+  const [hapusIds, setHapusIds] = useState<string[]>([]);
+  const [loadingDims, setLoadingDims] = useState(false);
+  // Kalau penyimpanan dimensi gagal setelah asesmen tersimpan, klik simpan lagi
+  // tidak boleh membuat asesmen kedua.
+  const [savedId, setSavedId] = useState<string | null>(null);
+
+  const isDim = DIMENSION_TYPES.includes(type);
+
   // Saat edit asesmen lama bertipe study_plan, tipenya tetap harus ada di dropdown
   // supaya tidak tampil kosong (dropdown terkunci saat edit).
   const opsiTipe = TYPE_ORDER.includes(type) ? TYPE_ORDER : [...TYPE_ORDER, type];
 
+  // Muat dimensi yang sudah ada saat edit.
+  useEffect(() => {
+    if (!initial || !DIMENSION_TYPES.includes(initial.assessment_type)) return;
+    setLoadingDims(true);
+    fetchDimensionsForAssessment(initial.id)
+      .then((rows) =>
+        setDims(
+          rows.map((d: any) => ({
+            id: d.id,
+            code: d.code ?? "",
+            label: d.label ?? "",
+            description: d.description ?? "",
+          }))
+        )
+      )
+      .catch((e: any) => setError(e?.message ?? "Gagal memuat dimensi."))
+      .finally(() => setLoadingDims(false));
+  }, [initial]);
+
+  // Asesmen baru bertipe Dimensi: sediakan dua baris kosong supaya langsung bisa diisi.
+  useEffect(() => {
+    if (isEdit || !isDim) return;
+    setDims((prev) =>
+      prev.length > 0
+        ? prev
+        : [
+            { code: "", label: "", description: "" },
+            { code: "", label: "", description: "" },
+          ]
+    );
+  }, [isEdit, isDim]);
+
   const toggleTingkat = (t: number) =>
     setTingkat((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
+
+  const ubahDim = (i: number, patch: Partial<DimRow>) =>
+    setDims((prev) => prev.map((d, idx) => (idx === i ? { ...d, ...patch } : d)));
+
+  const tambahDim = () => setDims((prev) => [...prev, { code: "", label: "", description: "" }]);
+
+  const hapusDim = (i: number) => {
+    const d = dims[i];
+    if (d.id) setHapusIds((prev) => [...prev, d.id as string]);
+    setDims((prev) => prev.filter((_, idx) => idx !== i));
+  };
+
+  const validasiDimensi = (): string | null => {
+    if (dims.length < 2) return "Tambahkan minimal 2 dimensi.";
+    const seen = new Set<string>();
+    for (let i = 0; i < dims.length; i++) {
+      const code = dims[i].code.trim().toUpperCase();
+      if (!code) return `Kode dimensi nomor ${i + 1} wajib diisi.`;
+      if (!dims[i].label.trim()) return `Nama dimensi nomor ${i + 1} wajib diisi.`;
+      if (seen.has(code)) return `Kode dimensi "${code}" dipakai dua kali. Kode harus unik.`;
+      seen.add(code);
+    }
+    return null;
+  };
+
+  const simpanDimensi = async (assessmentId: string) => {
+    for (const hid of hapusIds) await deleteDimension(hid);
+    setHapusIds([]);
+
+    const kerja = [...dims];
+    for (let i = 0; i < kerja.length; i++) {
+      const d = kerja[i];
+      const payload = {
+        assessment_id: assessmentId,
+        code: d.code.trim().toUpperCase(),
+        label: d.label.trim(),
+        description: d.description.trim() || null,
+        sort_order: i + 1,
+      } as any;
+      if (d.id) {
+        await updateDimension(d.id, payload);
+      } else {
+        const baru = await createDimension(payload);
+        kerja[i] = { ...d, id: (baru as any).id };
+        setDims([...kerja]); // simpan id supaya tidak terbuat dobel kalau ada yang gagal
+      }
+    }
+  };
 
   const handleSave = async () => {
     if (!title.trim()) return setError("Judul asesmen wajib diisi.");
@@ -136,11 +237,15 @@ function AssessmentModal({
     if (durasiNum !== null && (!Number.isFinite(durasiNum) || durasiNum <= 0)) {
       return setError("Durasi harus berupa angka lebih dari 0.");
     }
+    if (isDim) {
+      const err = validasiDimensi();
+      if (err) return setError(err);
+    }
     setSaving(true);
     setError(null);
     try {
       const id = await saveAssessment({
-        id: initial?.id,
+        id: initial?.id ?? savedId ?? undefined,
         title,
         description,
         assessment_type: type,
@@ -151,6 +256,8 @@ function AssessmentModal({
         duration_minutes: durasiNum,
         tingkat,
       });
+      setSavedId(id);
+      if (isDim) await simpanDimensi(id);
       onSaved();
       onClose();
       // form baru -> langsung ke halaman penyusun pertanyaan
@@ -218,7 +325,8 @@ function AssessmentModal({
               <p className="text-xs text-muted mt-1.5 leading-relaxed">
                 {isEdit ? "Tipe tidak bisa diubah setelah dibuat. " : ""}
                 {TYPE_INFO[type]?.hint}
-                {!isEdit && type !== "form" && " Dimensi dan soalnya diatur lewat Kelola Soal."}
+                {!isEdit && type !== "form" && !isDim && " Dimensi dan soalnya diatur lewat Kelola Soal."}
+                {!isEdit && isDim && " Isi dimensinya di bawah, soalnya diatur lewat Kelola Soal."}
               </p>
             </div>
 
@@ -245,6 +353,85 @@ function AssessmentModal({
               </div>
             </div>
           </div>
+
+          {/* Dimensi: hanya untuk tipe Dimensi */}
+          {isDim && (
+            <div className="rounded-xl border border-primary-100 p-4">
+              <div className="flex items-start justify-between gap-3 mb-1">
+                <div>
+                  <label className={`${labelCls} !mb-0`}>Dimensi</label>
+                  <p className="text-xs text-muted mt-1 leading-relaxed">
+                    Kategori hasil yang dinilai. Contoh gaya belajar: Visual, Auditori, Kinestetik. Kode dipakai
+                    saat memetakan soal ke dimensi, jadi pilih singkatan pendek dan jangan diubah setelahnya.
+                  </p>
+                </div>
+              </div>
+
+              {loadingDims ? (
+                <div className="flex items-center gap-2 text-sm text-muted py-4">
+                  <Loader2 size={16} className="animate-spin" /> Memuat dimensi...
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3 mt-3">
+                  {dims.map((d, i) => (
+                    <div key={d.id ?? `baru-${i}`} className="rounded-xl bg-surface p-3">
+                      <div className="flex gap-2">
+                        <input
+                          value={d.code}
+                          onChange={(e) =>
+                            ubahDim(i, { code: e.target.value.toUpperCase().replace(/\s+/g, "") })
+                          }
+                          disabled={!!d.id}
+                          maxLength={12}
+                          placeholder="Kode"
+                          title={d.id ? "Kode dimensi yang sudah tersimpan tidak bisa diubah" : "Contoh: VIS"}
+                          className={`${controlCls} !w-28 font-mono text-sm disabled:opacity-60`}
+                        />
+                        <input
+                          value={d.label}
+                          onChange={(e) => ubahDim(i, { label: e.target.value })}
+                          placeholder="Nama dimensi, contoh: Visual"
+                          className={`${controlCls} flex-1`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => hapusDim(i)}
+                          aria-label="Hapus dimensi"
+                          title="Hapus dimensi"
+                          className="shrink-0 flex items-center justify-center text-red-600 bg-red-50 hover:bg-red-100 w-10 rounded-xl transition-colors"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                      <textarea
+                        value={d.description}
+                        onChange={(e) => ubahDim(i, { description: e.target.value })}
+                        rows={2}
+                        placeholder="Penjelasan hasil yang dibaca siswa jika dimensi ini paling tinggi (opsional)"
+                        className={`${controlCls} resize-y leading-relaxed mt-2`}
+                      />
+                    </div>
+                  ))}
+
+                  <button
+                    type="button"
+                    onClick={tambahDim}
+                    className="flex items-center justify-center gap-2 text-sm font-semibold text-primary-700 bg-primary-50 hover:bg-primary-100 py-2.5 rounded-xl transition-colors"
+                  >
+                    <Plus size={15} />
+                    Tambah dimensi
+                  </button>
+
+                  {isEdit && (
+                    <p className="text-xs text-amber-700 bg-amber-50 rounded-lg px-3 py-2 leading-relaxed">
+                      Hati-hati menghapus dimensi yang sudah dipakai soal. Soal yang dipetakan ke dimensi itu tidak
+                      akan terhitung di hasil.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
@@ -323,7 +510,7 @@ function AssessmentModal({
             </button>
             <button
               onClick={handleSave}
-              disabled={saving}
+              disabled={saving || loadingDims}
               className="flex-1 flex items-center justify-center gap-2 bg-primary-700 hover:bg-primary-800 disabled:opacity-60 text-white text-sm font-semibold py-3 rounded-xl"
             >
               {saving && <Loader2 size={16} className="animate-spin" />}
