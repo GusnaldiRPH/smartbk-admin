@@ -28,33 +28,40 @@ import { EmptyState, PageHeader, controlCls, labelCls } from "@/components/ui";
 
 // Nilai yang tersimpan di database (key) TIDAK diubah, karena aplikasi memakainya
 // untuk menghitung hasil. Yang berubah hanya label dan keterangannya untuk guru.
+// Label menyebut JENIS cara jawab dan penilaian, bukan nama asesmennya.
+const HINT_DIMENSI_YA_TIDAK =
+  "Setiap soal dihitung ke satu dimensi. Hasilnya dimensi dengan skor tertinggi beserta rincian skor tiap dimensi. Cocok untuk gaya belajar, minat studi lanjut, dan sejenisnya.";
+
 const TYPE_INFO: Record<string, { label: string; hint: string }> = {
   form: {
     label: "Form / Angket",
     hint: "Pertanyaan disusun sendiri lewat tombol Susun Form (isian, pilihan tunggal, atau pilihan ganda). Tanpa skor atau kategori; jawaban siswa ditampilkan apa adanya.",
   },
   stress_scale: {
-    label: "Likert · Skala Stres",
+    label: "Likert · Skor total",
     hint: "Jawaban berupa skala (misalnya sangat setuju sampai sangat tidak setuju), dijumlah jadi satu skor total lalu dikategorikan Rendah, Sedang, atau Tinggi.",
   },
   learning_style: {
-    label: "Dimensi · Gaya Belajar",
-    hint: "Skor dihitung per dimensi gaya belajar. Hasilnya gaya yang paling menonjol beserta rincian skor tiap gaya.",
+    label: "Dimensi · Ya/Tidak",
+    hint: HINT_DIMENSI_YA_TIDAK,
   },
   disc: {
-    label: "Dimensi · Kepribadian DISC",
-    hint: "Skor dihitung per dimensi kepribadian (D, I, S, C). Hasilnya tipe yang paling dominan beserta rincian skornya.",
+    label: "Dimensi · Pilihan ganda",
+    hint: "Setiap pilihan jawaban mewakili satu dimensi (misalnya D, I, S, C). Hasilnya dimensi yang paling dominan beserta rincian skornya.",
   },
+  // Cara hitungnya sama dengan learning_style. Dipertahankan hanya agar asesmen lama
+  // bertipe ini tetap tampil benar. Tidak ditawarkan lagi saat membuat asesmen baru.
   study_plan: {
-    label: "Dimensi · Studi Lanjut",
-    hint: "Skor dihitung per bidang (RIASEC). Hasilnya bidang studi atau karier yang paling diminati.",
+    label: "Dimensi · Ya/Tidak",
+    hint: HINT_DIMENSI_YA_TIDAK,
   },
   rmib: {
-    label: "Ranking · Minat RMIB",
+    label: "Ranking · Urutan minat",
     hint: "Siswa mengurutkan pilihan, lalu diperingkat per bidang minat kerja. Peringkat lebih kecil berarti lebih diminati.",
   },
 };
-const TYPE_ORDER = ["form", "stress_scale", "learning_style", "disc", "study_plan", "rmib"];
+// Pilihan saat membuat asesmen baru (study_plan sengaja tidak ada supaya tidak dobel).
+const TYPE_ORDER = ["form", "stress_scale", "learning_style", "disc", "rmib"];
 const typeLabel = (t: string) => TYPE_INFO[t]?.label ?? t;
 
 const ROMAWI: Record<number, string> = { 10: "X", 11: "XI", 12: "XII" };
@@ -114,6 +121,10 @@ function AssessmentModal({
   const [tingkat, setTingkat] = useState<number[]>(initial?.tingkat ?? [10, 11, 12]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Saat edit asesmen lama bertipe study_plan, tipenya tetap harus ada di dropdown
+  // supaya tidak tampil kosong (dropdown terkunci saat edit).
+  const opsiTipe = TYPE_ORDER.includes(type) ? TYPE_ORDER : [...TYPE_ORDER, type];
 
   const toggleTingkat = (t: number) =>
     setTingkat((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
@@ -198,7 +209,7 @@ function AssessmentModal({
                 disabled={isEdit}
                 className={controlCls}
               >
-                {TYPE_ORDER.map((value) => (
+                {opsiTipe.map((value) => (
                   <option key={value} value={value}>
                     {typeLabel(value)}
                   </option>
