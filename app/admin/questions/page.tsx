@@ -6,7 +6,6 @@ import {
   Plus,
   Pencil,
   Trash2,
-  Loader2,
   Upload,
   Search,
   ListOrdered,
@@ -23,6 +22,7 @@ import ImportQuestionsModal from "@/components/ImportQuestionsModal";
 import ImportDiscQuestionsModal from "@/components/ImportDiscQuestionsModal";
 import ImportRmibQuestionsModal from "@/components/ImportRmibQuestionsModal";
 import ReorderQuestionsModal from "@/components/ReorderQuestionsModal";
+import ConfirmDialog from "@/components/ConfirmDialog";
 import {
   EmptyState,
   PageHeader,
@@ -64,9 +64,13 @@ export default function ManageQuestionsPage() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [dimensions, setDimensions] = useState<Dimension[]>([]);
   const [loading, setLoading] = useState(true);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showReorderModal, setShowReorderModal] = useState(false);
+
+  // Dialog konfirmasi hapus
+  const [toDelete, setToDelete] = useState<Question | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("order");
@@ -101,16 +105,29 @@ export default function ManageQuestionsPage() {
     fetchAllQuestions(assessmentId).then(setQuestions);
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Hapus soal ini? Tindakan ini tidak bisa dibatalkan.")) return;
-    setDeletingId(id);
+  const askDelete = (q: Question) => {
+    setDeleteError(null);
+    setToDelete(q);
+  };
+
+  const closeDelete = () => {
+    if (deleting) return;
+    setToDelete(null);
+    setDeleteError(null);
+  };
+
+  const confirmDelete = async () => {
+    if (!toDelete) return;
+    setDeleting(true);
+    setDeleteError(null);
     try {
-      await deleteQuestion(id);
-      setQuestions((prev) => prev.filter((q) => q.id !== id));
+      await deleteQuestion(toDelete.id);
+      setQuestions((prev) => prev.filter((q) => q.id !== toDelete.id));
+      setToDelete(null);
     } catch (err: any) {
-      alert(err.message ?? "Gagal menghapus soal.");
+      setDeleteError(err.message ?? "Gagal menghapus soal.");
     } finally {
-      setDeletingId(null);
+      setDeleting(false);
     }
   };
 
@@ -163,6 +180,8 @@ export default function ManageQuestionsPage() {
     dir: sortDir,
     onClick: () => handleSort(key),
   });
+
+  const itemNoun = isRmib ? "kelompok" : "soal";
 
   return (
     <div className="p-4 sm:p-8 max-w-5xl">
@@ -283,16 +302,12 @@ export default function ManageQuestionsPage() {
                             <Pencil size={14} color="#0a7d4e" />
                           </Link>
                           <button
-                            onClick={() => handleDelete(q.id)}
-                            disabled={deletingId === q.id}
-                            className="w-8 h-8 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors disabled:opacity-50"
+                            onClick={() => askDelete(q)}
+                            className="w-8 h-8 rounded-lg bg-red-50 hover:bg-red-100 flex items-center justify-center transition-colors"
                             title="Hapus"
+                            aria-label={`Hapus soal nomor ${q.question_order}`}
                           >
-                            {deletingId === q.id ? (
-                              <Loader2 size={14} className="animate-spin text-red-600" />
-                            ) : (
-                              <Trash2 size={14} color="#dc2626" />
-                            )}
+                            <Trash2 size={14} color="#dc2626" />
                           </button>
                         </div>
                       </td>
@@ -369,6 +384,30 @@ export default function ManageQuestionsPage() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!toDelete}
+        title={`Hapus ${itemNoun} ini?`}
+        subject={
+          toDelete
+            ? toDelete.question_text.length > 160
+              ? `${toDelete.question_text.slice(0, 160)}…`
+              : toDelete.question_text
+            : undefined
+        }
+        meta={toDelete ? `Urutan ${toDelete.question_order}${selectedAssessment ? ` • ${selectedAssessment.title}` : ""}` : undefined}
+        description={
+          <>
+            {isRmib ? "Kelompok" : "Soal"} ini akan dihapus permanen dan tidak bisa dikembalikan. Jawaban siswa yang
+            sudah tersimpan untuk {itemNoun} ini juga ikut terhapus.
+          </>
+        }
+        confirmLabel="Ya, Hapus"
+        loading={deleting}
+        error={deleteError}
+        onConfirm={confirmDelete}
+        onCancel={closeDelete}
+      />
     </div>
   );
 }
